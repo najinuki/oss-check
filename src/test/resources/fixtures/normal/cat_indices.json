@@ -1,0 +1,50 @@
+[
+  {
+    "health": "green",
+    "status": "open",
+    "index": "logs-2026.07.15",
+    "uuid": "aBcDeFgHiJkLmNoPqRsT01",
+    "pri": "2",
+    "rep": "1",
+    "docs.count": "249300",
+    "docs.deleted": "0",
+    "store.size": "207618048",
+    "pri.store.size": "103809024"
+  },
+  {
+    "health": "green",
+    "status": "open",
+    "index": "products",
+    "uuid": "aBcDeFgHiJkLmNoPqRsT02",
+    "pri": "1",
+    "rep": "1",
+    "docs.count": "5400",
+    "docs.deleted": "12",
+    "store.size": "4194304",
+    "pri.store.size": "2097152"
+  },
+  {
+    "health": "green",
+    "status": "open",
+    "index": ".opensearch-observability",
+    "uuid": "aBcDeFgHiJkLmNoPqRsT03",
+    "pri": "1",
+    "rep": "1",
+    "docs.count": "0",
+    "docs.deleted": "0",
+    "store.size": "416",
+    "pri.store.size": "208"
+  },
+  {
+    "health": "green",
+    "status": "open",
+    "index": ".plugins-ml-config",
+    "uuid": "aBcDeFgHiJkLmNoPqRsT04",
+    "pri": "1",
+    "rep": "1",
+    "docs.count": "1",
+    "docs.deleted": "0",
+    "store.size": "7778",
+    "pri.store.size": "3889"
+  }
+]

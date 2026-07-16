@@ -1,0 +1,35 @@
+[
+  {
+    "shards": "4",
+    "disk.indices": "103812321",
+    "disk.used": "12884901888",
+    "disk.avail": "94489280512",
+    "disk.total": "107374182400",
+    "disk.percent": "12",
+    "host": "10.0.0.1",
+    "ip": "10.0.0.1",
+    "node": "node-1"
+  },
+  {
+    "shards": "3",
+    "disk.indices": "54526160",
+    "disk.used": "11811160064",
+    "disk.avail": "95563022336",
+    "disk.total": "107374182400",
+    "disk.percent": "11",
+    "host": "10.0.0.2",
+    "ip": "10.0.0.2",
+    "node": "node-2"
+  },
+  {
+    "shards": "3",
+    "disk.indices": "53481265",
+    "disk.used": "11274289152",
+    "disk.avail": "96099893248",
+    "disk.total": "107374182400",
+    "disk.percent": "10",
+    "host": "10.0.0.3",
+    "ip": "10.0.0.3",
+    "node": "node-3"
+  }
+]

@@ -1,0 +1,102 @@
+[
+  {
+    "index": "logs-2026.07.15",
+    "shard": "0",
+    "prirep": "p",
+    "state": "STARTED",
+    "docs": "125000",
+    "store": "52428800",
+    "ip": "10.0.0.1",
+    "node": "node-1"
+  },
+  {
+    "index": "logs-2026.07.15",
+    "shard": "0",
+    "prirep": "r",
+    "state": "STARTED",
+    "docs": "125000",
+    "store": "52428800",
+    "ip": "10.0.0.2",
+    "node": "node-2"
+  },
+  {
+    "index": "logs-2026.07.15",
+    "shard": "1",
+    "prirep": "p",
+    "state": "STARTED",
+    "docs": "124300",
+    "store": "51380224",
+    "ip": "10.0.0.3",
+    "node": "node-3"
+  },
+  {
+    "index": "logs-2026.07.15",
+    "shard": "1",
+    "prirep": "r",
+    "state": "STARTED",
+    "docs": "124300",
+    "store": "51380224",
+    "ip": "10.0.0.1",
+    "node": "node-1"
+  },
+  {
+    "index": "products",
+    "shard": "0",
+    "prirep": "p",
+    "state": "STARTED",
+    "docs": "5400",
+    "store": "2097152",
+    "ip": "10.0.0.2",
+    "node": "node-2"
+  },
+  {
+    "index": "products",
+    "shard": "0",
+    "prirep": "r",
+    "state": "STARTED",
+    "docs": "5400",
+    "store": "2097152",
+    "ip": "10.0.0.3",
+    "node": "node-3"
+  },
+  {
+    "index": ".opensearch-observability",
+    "shard": "0",
+    "prirep": "p",
+    "state": "STARTED",
+    "docs": "0",
+    "store": "208",
+    "ip": "10.0.0.1",
+    "node": "node-1"
+  },
+  {
+    "index": ".opensearch-observability",
+    "shard": "0",
+    "prirep": "r",
+    "state": "STARTED",
+    "docs": "0",
+    "store": "208",
+    "ip": "10.0.0.2",
+    "node": "node-2"
+  },
+  {
+    "index": ".plugins-ml-config",
+    "shard": "0",
+    "prirep": "p",
+    "state": "STARTED",
+    "docs": "1",
+    "store": "3889",
+    "ip": "10.0.0.3",
+    "node": "node-3"
+  },
+  {
+    "index": ".plugins-ml-config",
+    "shard": "0",
+    "prirep": "r",
+    "state": "STARTED",
+    "docs": "1",
+    "store": "3889",
+    "ip": "10.0.0.1",
+    "node": "node-1"
+  }
+]

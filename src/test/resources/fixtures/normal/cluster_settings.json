@@ -1,0 +1,42 @@
+{
+  "persistent": {
+    "cluster": {
+      "max_shards_per_node": "1000"
+    }
+  },
+  "transient": {},
+  "defaults": {
+    "cluster": {
+      "name": "fixture-cluster",
+      "max_shards_per_node": "1000",
+      "routing": {
+        "allocation": {
+          "enable": "all",
+          "node_concurrent_recoveries": "2"
+        },
+        "rebalance": {
+          "enable": "all"
+        }
+      },
+      "blocks": {
+        "read_only": "false"
+      }
+    },
+    "discovery": {
+      "seed_hosts": [
+        "10.0.0.1",
+        "10.0.0.2",
+        "10.0.0.3"
+      ]
+    },
+    "search": {
+      "insights": {
+        "top_queries": {
+          "latency": {
+            "enabled": "false"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "_nodes": {
+    "total": 3,
+    "successful": 3,
+    "failed": 0
+  },
+  "cluster_name": "fixture-cluster",
+  "nodes": {
+    "aAbBcCdDeEfFgGhH0001": {
+      "timestamp": 1784188800000,
+      "name": "node-1",
+      "transport_address": "10.0.0.1:9300",
+      "host": "10.0.0.1",
+      "ip": "10.0.0.1:9300",
+      "roles": [
+        "cluster_manager",
+        "data",
+        "ingest"
+      ],
+      "jvm": {
+        "timestamp": 1784188800000,
+        "uptime_in_millis": 86400000,
+        "mem": {
+          "heap_used_in_bytes": 1288490188,
+          "heap_used_percent": 30,
+          "heap_committed_in_bytes": 4294967296,
+          "heap_max_in_bytes": 4294967296,
+          "non_heap_used_in_bytes": 209715200,
+          "non_heap_committed_in_bytes": 226492416
+        }
+      },
+      "breakers": {
+        "request": {
+          "limit_size_in_bytes": 2576980377,
+          "limit_size": "2.3gb",
+          "estimated_size_in_bytes": 0,
+          "estimated_size": "0b",
+          "overhead": 1.0,
+          "tripped": 0
+        },
+        "fielddata": {
+          "limit_size_in_bytes": 1717986918,
+          "limit_size": "1.5gb",
+          "estimated_size_in_bytes": 0,
+          "estimated_size": "0b",
+          "overhead": 1.03,
+          "tripped": 0
+        },
+        "in_flight_requests": {
+          "limit_size_in_bytes": 4294967296,
+          "limit_size": "4gb",
+          "estimated_size_in_bytes": 1024,
+          "estimated_size": "1kb",
+          "overhead": 2.0,
+          "tripped": 0
+        },
+        "parent": {
+          "limit_size_in_bytes": 4080218931,
+          "limit_size": "3.7gb",
+          "estimated_size_in_bytes": 1288490188,
+          "estimated_size": "1.1gb",
+          "overhead": 1.0,
+          "tripped": 0
+        }
+      }
+    },
+    "aAbBcCdDeEfFgGhH0002": {
+      "timestamp": 1784188800000,
+      "name": "node-2",
+      "transport_address": "10.0.0.2:9300",
+      "host": "10.0.0.2",
+      "ip": "10.0.0.2:9300",
+      "roles": [
+        "cluster_manager",
+        "data",
+        "ingest"
+      ],
+      "jvm": {
+        "timestamp": 1784188800000,
+        "uptime_in_millis": 86400000,
+        "mem": {
+          "heap_used_in_bytes": 1503238553,
+          "heap_used_percent": 35,
+          "heap_committed_in_bytes": 4294967296,
+          "heap_max_in_bytes": 4294967296,
+          "non_heap_used_in_bytes": 209715200,
+          "non_heap_committed_in_bytes": 226492416
+        }
+      },
+      "breakers": {
+        "request": {
+          "limit_size_in_bytes": 2576980377,
+          "limit_size": "2.3gb",
+          "estimated_size_in_bytes": 0,
+          "estimated_size": "0b",
+          "overhead": 1.0,
+          "tripped": 0
+        },
+        "fielddata": {
+          "limit_size_in_bytes": 1717986918,
+          "limit_size": "1.5gb",
+          "estimated_size_in_bytes": 0,
+          "estimated_size": "0b",
+          "overhead": 1.03,
+          "tripped": 0
+        },
+        "in_flight_requests": {
+          "limit_size_in_bytes": 4294967296,
+          "limit_size": "4gb",
+          "estimated_size_in_bytes": 512,
+          "estimated_size": "512b",
+          "overhead": 2.0,
+          "tripped": 0
+        },
+        "parent": {
+          "limit_size_in_bytes": 4080218931,
+          "limit_size": "3.7gb",
+          "estimated_size_in_bytes": 1503238553,
+          "estimated_size": "1.3gb",
+          "overhead": 1.0,
+          "tripped": 0
+        }
+      }
+    },
+    "aAbBcCdDeEfFgGhH0003": {
+      "timestamp": 1784188800000,
+      "name": "node-3",
+      "transport_address": "10.0.0.3:9300",
+      "host": "10.0.0.3",
+      "ip": "10.0.0.3:9300",
+      "roles": [
+        "cluster_manager",
+        "data",
+        "ingest"
+      ],
+      "jvm": {
+        "timestamp": 1784188800000,
+        "uptime_in_millis": 86400000,
+        "mem": {
+          "heap_used_in_bytes": 1073741824,
+          "heap_used_percent": 25,
+          "heap_committed_in_bytes": 4294967296,
+          "heap_max_in_bytes": 4294967296,
+          "non_heap_used_in_bytes": 209715200,
+          "non_heap_committed_in_bytes": 226492416
+        }
+      },
+      "breakers": {
+        "request": {
+          "limit_size_in_bytes": 2576980377,
+          "limit_size": "2.3gb",
+          "estimated_size_in_bytes": 0,
+          "estimated_size": "0b",
+          "overhead": 1.0,
+          "tripped": 0
+        },
+        "fielddata": {
+          "limit_size_in_bytes": 1717986918,
+          "limit_size": "1.5gb",
+          "estimated_size_in_bytes": 0,
+          "estimated_size": "0b",
+          "overhead": 1.03,
+          "tripped": 0
+        },
+        "in_flight_requests": {
+          "limit_size_in_bytes": 4294967296,
+          "limit_size": "4gb",
+          "estimated_size_in_bytes": 0,
+          "estimated_size": "0b",
+          "overhead": 2.0,
+          "tripped": 0
+        },
+        "parent": {
+          "limit_size_in_bytes": 4080218931,
+          "limit_size": "3.7gb",
+          "estimated_size_in_bytes": 1073741824,
+          "estimated_size": "1gb",
+          "overhead": 1.0,
+          "tripped": 0
+        }
+      }
+    }
+  }
+}
