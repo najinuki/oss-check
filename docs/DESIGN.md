@@ -139,10 +139,4 @@ public interface DiagnosticRule {
 2. ~~프로젝트 골격: 디렉토리 구조, 룰 엔진 인터페이스, 수집기 계층~~ ✅ 완료 — `rule` 패키지(인터페이스·엔진), `collect` 패키지(`CollectTarget`/`RawDump`/`DumpSource` 경계)
 3. collect 구현 → diagnose offline 모드 → 룰 3개 → live 모드 순서 권장 ← **여기부터 시작**
 
-구현 노트 (파싱 관련 결정):
-- _cat 엔드포인트는 `bytes=b` 파라미터를 추가해 수집 (사이즈를 사람용 문자열 대신 숫자로 받음).
-  단, 파서(`SizeParser`)는 `"1.2gb"` 형태도 허용 — 외부에서 만든 덤프 호환.
-- `_cluster/allocation/explain`은 unassigned 샤드가 없으면 HTTP 400 에러 바디를 반환 →
-  스냅샷에서 `Optional.empty()`로 처리 (파싱 실패 아님).
-- 클러스터 설정은 파싱 시점에 dotted key로 평탄화. `ClusterSettings.effective()`가
-  transient > persistent > defaults 우선순위 적용, `explicit()`은 운영자가 명시한 값만 조회.
+구현 구조와 진행 중 내린 세부 결정(결정 로그)은 [IMPLEMENTATION.md](IMPLEMENTATION.md) 참고.
