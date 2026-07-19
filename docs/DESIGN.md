@@ -37,6 +37,21 @@ CLI 도구치고 무겁다는 트레이드오프는 인지하고 수용한 결�
     - `_cat/shards?format=json`
     - `_cat/indices?format=json`
     - `_cat/allocation?format=json`
+    - `_cluster/pending_tasks` — 클러스터 상태 업데이트 큐 적체(마스터 과부하·스플릿브레인 전조) 확인용
+    - `_cluster/stats` — 클러스터 전체 집계(노드 역할별 개수, 플러그인·버전 목록, 총 샤드/인덱스 수). `_nodes/stats` 합산값과 교차검증 + 플러그인 버전 불일치 진단에 사용
+    - `_cat/nodes?format=json&full_id=true` — 현재 마스터로 선출된 노드 식별('m' 컬럼). `_nodes/stats`에는 이 정보가 없음
+    - `_cat/recovery?format=json&active_only=true` — 진행 중인 샤드 리커버리/릴로케이션. 리밸런스 정체·복구 지연 진단용
+    - `_cat/segments?format=json` — 샤드당 세그먼트 수/크기. 과다 세그먼트로 인한 검색 지연 진단용 (대형 클러스터에서는 응답이 클 수 있음, 주의)
+    - `_cat/plugins?format=json` — 설치된 플러그인·버전 목록. 노드 간 플러그인 버전 불일치·호환성 진단용
+    - `_cat/fielddata?format=json&bytes=b` — 노드·필드별 fielddata 메모리 사용량. OSC-001(서킷 브레이커) 계열 룰에서 "어떤 필드가 breaker를 밀어올리는지"까지 근거를 좁히는 데 사용
+    - `_index_template` — 인덱스 템플릿 정의(매핑·설정 포함). 템플릿 오설정/매핑 위생 진단용. **주의**: 필드명 등 스키마 정보가 포함되므로 IMPLEMENTATION.md의 "덤프에 인덱스명 포함" 경고에 매핑 필드명도 추가해야 함
+
+  다음은 조사했으나 **의도적으로 제외**했다:
+    - `_nodes/hot_threads` — 응답이 JSON이 아닌 텍스트라 현재의 JSON 전용 파싱 모델과 맞지 않음 (v0.2 이후 텍스트 아티팩트 저장을 지원하면 재검토)
+    - `_mapping` (전체) — 대형 클러스터에서 응답이 지나치게 커질 수 있고, `_index_template`보다 민감정보(실제 운영 필드 스키마 전체) 노출 범위가 큼
+    - `_snapshot/{repo}/_all` 류 스냅샷 상태 — 저장소 이름을 먼저 알아야 호출 가능한 동적 엔드포인트라 "고정 목록" 원칙에 안 맞음. `_snapshot`(저장소 목록)만으로는 실익이 적어 이번엔 제외
+    - X-Pack 계열(`_ml`, `_security`, `_watcher`, `_ccr`, `_slm`, `_transform` 등) — Elasticsearch 상용 플러그인 전용이라 OpenSearch 스코프 밖
+    - `_cat/thread_pool` — 이미 수집 중인 `_nodes/stats` 응답 안에 동일 데이터(스레드풀 큐·rejected)가 있음. **새 엔드포인트가 아니라 `ClusterSnapshotParser`가 그 필드를 더 파싱하면 되는 문제** (룰이 필요로 할 때 추가)
 - **접속 옵션**: `--endpoint`, `--user` / `--password` (환경변수 대체 가능), `--insecure` (자체 서명 인증서 허용)
 - **출력물에 메타데이터 파일 포함**: 수집 시각, 도구 버전, 클러스터 이름/버전
 - 외부 통신은 대상 클러스터 단 하나뿐

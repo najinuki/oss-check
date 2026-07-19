@@ -16,7 +16,15 @@ public enum CollectTarget {
     NODES_STATS("_nodes/stats", "nodes_stats.json"),
     CAT_SHARDS("_cat/shards?format=json&bytes=b", "cat_shards.json"),
     CAT_INDICES("_cat/indices?format=json&bytes=b", "cat_indices.json"),
-    CAT_ALLOCATION("_cat/allocation?format=json&bytes=b", "cat_allocation.json");
+    CAT_ALLOCATION("_cat/allocation?format=json&bytes=b", "cat_allocation.json"),
+    CLUSTER_PENDING_TASKS("_cluster/pending_tasks", "cluster_pending_tasks.json"),
+    CLUSTER_STATS("_cluster/stats", "cluster_stats.json"),
+    CAT_NODES("_cat/nodes?format=json&full_id=true&bytes=b", "cat_nodes.json"),
+    CAT_RECOVERY("_cat/recovery?format=json&active_only=true&bytes=b", "cat_recovery.json"),
+    CAT_SEGMENTS("_cat/segments?format=json&bytes=b", "cat_segments.json"),
+    CAT_PLUGINS("_cat/plugins?format=json", "cat_plugins.json"),
+    CAT_FIELDDATA("_cat/fielddata?format=json&bytes=b", "cat_fielddata.json"),
+    INDEX_TEMPLATES("_index_template", "index_templates.json");
 
     /** Name of the metadata file collect writes alongside the API responses. */
     public static final String METADATA_FILE_NAME = "metadata.json";

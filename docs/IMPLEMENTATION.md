@@ -62,7 +62,7 @@ DESIGN.md 4.2의 인터페이스를 그대로 구현:
 
 ## 4. `collect` 패키지 — 수집 계층 경계
 
-- `CollectTarget` enum — 수집할 7개 엔드포인트 경로와 **아카이브 내 파일명**을 한 곳에 못 박음.
+- `CollectTarget` enum — 수집할 15개 엔드포인트 경로와 **아카이브 내 파일명**을 한 곳에 못 박음.
   live 수집기와 tar.gz 리더가 공유하므로 두 모드의 덤프 구조가 항상 일치한다.
   `metadata.json` 파일명 상수도 여기에 있다.
 - `RawDump` — 파싱 전 원본 JSON 묶음 (metadata + 타깃별 payload 맵).
@@ -94,6 +94,7 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 5 | core 패키지는 Spring 비의존 | 룰·파서 테스트가 Spring 컨텍스트 없이 도는 순수 단위 테스트. Spring/picocli 와이어링은 CLI 계층에서만 |
 | 6 | 필수 파일 누락·JSON 파손 시 즉시 예외 (`SnapshotParseException`) | 조용히 넘어가면 미탐으로 이어짐. 실행 오류는 종료 코드 2로 구분되므로(DESIGN.md 3.2) 시끄럽게 실패하는 것이 맞다 |
 | 7 | Jackson 3 (`tools.jackson`, Spring Boot 4 관리 버전) 사용 | Boot 4의 기본 Jackson 세대와 통일. Jackson 2를 별도 추가하면 uber-jar에 두 세대가 공존하게 됨 |
+| 8 | `CollectTarget`을 7개→15개로 확장 (`CLUSTER_PENDING_TASKS`, `CLUSTER_STATS`, `CAT_NODES`, `CAT_RECOVERY`, `CAT_SEGMENTS`, `CAT_PLUGINS`, `CAT_FIELDDATA`, `INDEX_TEMPLATES` 추가) | 초기 룰 3개가 요구하는 최소 필드만 모으던 원칙(DESIGN.md 4.3 인용 근거)을 넘어, 향후 룰이 필요로 할 만한 데이터를 미리 폭넓게 수집하기로 방향 전환. 근거: elastic/support-diagnostics(공식 진단 수집기)의 수집 목록과 AutoOps 이벤트 카탈로그(pending tasks, 플러그인 호환성, 세그먼트, fielddata 등)를 참고해 선정. HTTP 라이브 수집기가 아직 미구현 상태라 지금이 확장 비용이 가장 낮은 시점. **새 타깃은 아직 `ClusterSnapshotParser`가 파싱하지 않는다** — 룰이 실제로 필요로 할 때 파싱을 추가한다(수집과 파싱을 분리: collect는 넓게, parse는 룰 수요 기반) |
 
 ## 7. 다음 단계
 
