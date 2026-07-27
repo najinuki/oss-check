@@ -1,6 +1,16 @@
 {
+  "dump_schema_version": 1,
   "collected_at": "2026-07-16T08:00:00Z",
   "tool_version": "0.1.0-SNAPSHOT",
   "cluster_name": "fixture-cluster",
-  "cluster_version": "2.19.1"
+  "cluster_version": "2.19.1",
+  "collection": [
+    { "target": "CLUSTER_HEALTH", "status": "OK", "http_status": 200 },
+    { "target": "NODES_STATS", "status": "OK", "http_status": 200 },
+    { "target": "CLUSTER_SETTINGS", "status": "OK", "http_status": 200 },
+    { "target": "ALLOCATION_EXPLAIN", "status": "FAILED", "http_status": 400, "message": "unable to find any unassigned shards to explain" },
+    { "target": "CAT_SHARDS", "status": "OK", "http_status": 200 },
+    { "target": "CAT_INDICES", "status": "OK", "http_status": 200 },
+    { "target": "CAT_ALLOCATION", "status": "OK", "http_status": 200 }
+  ]
 }

@@ -1,12 +1,18 @@
 package com.nj.oss.check.snapshot;
 
 import com.nj.oss.check.collect.CollectTarget;
+import com.nj.oss.check.collect.CollectionOutcome;
 import com.nj.oss.check.collect.RawDump;
 import com.nj.oss.check.testsupport.Fixtures;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,7 +44,7 @@ class ClusterSnapshotParserTest {
     @Test
     void flattensSettingsAndAppliesPrecedence() {
         ClusterSnapshot snapshot = parser.parse(Fixtures.load("normal"));
-        ClusterSettings settings = snapshot.settings();
+        ClusterSettings settings = snapshot.settings().orElseThrow();
 
         // persistent overrides defaults; both hold the same value here but the
         // key must be visible as explicitly set
@@ -111,8 +117,9 @@ class ClusterSnapshotParserTest {
     void parsesCatResponses() {
         ClusterSnapshot snapshot = parser.parse(Fixtures.load("normal"));
 
-        assertThat(snapshot.shards()).hasSize(10);
-        ShardEntry firstShard = snapshot.shards().getFirst();
+        List<ShardEntry> shards = snapshot.shards().orElseThrow();
+        assertThat(shards).hasSize(10);
+        ShardEntry firstShard = shards.getFirst();
         assertThat(firstShard.index()).isEqualTo("logs-2026.07.15");
         assertThat(firstShard.shard()).isZero();
         assertThat(firstShard.isPrimary()).isTrue();
@@ -121,16 +128,18 @@ class ClusterSnapshotParserTest {
         assertThat(firstShard.storeBytes()).isEqualTo(52428800L);
         assertThat(firstShard.node()).isEqualTo("node-1");
 
-        assertThat(snapshot.indices()).hasSize(4);
-        IndexEntry logs = snapshot.indices().getFirst();
+        List<IndexEntry> indices = snapshot.indices().orElseThrow();
+        assertThat(indices).hasSize(4);
+        IndexEntry logs = indices.getFirst();
         assertThat(logs.index()).isEqualTo("logs-2026.07.15");
         assertThat(logs.pri()).isEqualTo(2);
         assertThat(logs.rep()).isEqualTo(1);
         assertThat(logs.docsCount()).isEqualTo(249300L);
         assertThat(logs.storeSizeBytes()).isEqualTo(207618048L);
 
-        assertThat(snapshot.allocations()).hasSize(3);
-        NodeAllocation node1 = snapshot.allocations().getFirst();
+        List<NodeAllocation> allocations = snapshot.allocations().orElseThrow();
+        assertThat(allocations).hasSize(3);
+        NodeAllocation node1 = allocations.getFirst();
         assertThat(node1.node()).isEqualTo("node-1");
         assertThat(node1.shards()).isEqualTo(4);
         assertThat(node1.diskPercent()).isEqualTo(12);
@@ -138,20 +147,152 @@ class ClusterSnapshotParserTest {
     }
 
     @Test
-    void failsLoudlyWhenRequiredFileMissing() {
-        RawDump normal = Fixtures.load("normal");
-        Map<CollectTarget, String> withoutHealth = new HashMap<>(normal.payloads());
-        withoutHealth.remove(CollectTarget.CLUSTER_HEALTH);
-        RawDump dump = new RawDump(normal.metadataJson(), withoutHealth);
+    void parsesCollectionReport() {
+        SnapshotMetadata metadata = parser.parse(Fixtures.load("normal")).metadata();
 
-        assertThatThrownBy(() -> parser.parse(dump))
-                .isInstanceOf(SnapshotParseException.class)
-                .hasMessageContaining("cluster_health.json");
+        assertThat(metadata.dumpSchemaVersion()).isEqualTo(SnapshotMetadata.CURRENT_DUMP_SCHEMA_VERSION);
+        assertThat(metadata.isNewerThanSupported()).isFalse();
+        assertThat(metadata.collection()).hasSize(CollectTarget.values().length);
+
+        assertThat(metadata.outcomeOf(CollectTarget.CLUSTER_HEALTH).orElseThrow().isOk()).isTrue();
+
+        CollectionOutcome explain = metadata.outcomeOf(CollectTarget.ALLOCATION_EXPLAIN).orElseThrow();
+        assertThat(explain.isOk()).isFalse();
+        assertThat(explain.httpStatus()).isEqualTo(400);
+        assertThat(explain.describeFailure()).contains("HTTP 400: unable to find any unassigned shards to explain");
+    }
+
+    @Nested
+    class RequiredTargets {
+
+        @ParameterizedTest
+        @EnumSource(value = CollectTarget.class, names = {"CLUSTER_HEALTH", "NODES_STATS"})
+        void failLoudlyWhenMissing(CollectTarget required) {
+            RawDump dump = withoutPayload(Fixtures.load("normal"), required);
+
+            assertThatThrownBy(() -> parser.parse(dump))
+                    .isInstanceOf(SnapshotParseException.class)
+                    .hasMessageContaining(required.fileName());
+        }
+
+        @Test
+        void areExactlyTheTargetsNoRuleCouldRunWithout() {
+            // Guards the growth rule: a new target must be OPTIONAL, because
+            // promoting one to REQUIRED makes existing dumps unreadable.
+            assertThat(Arrays.stream(CollectTarget.values()).filter(CollectTarget::isRequired))
+                    .containsExactly(CollectTarget.CLUSTER_HEALTH, CollectTarget.NODES_STATS);
+        }
+    }
+
+    @Nested
+    class OptionalTargets {
+
+        @Test
+        void parseIntoEmptyFieldsWhenAbsent() {
+            ClusterSnapshot snapshot = parser.parse(Fixtures.load("required-only"));
+
+            // never substituted with empty collections: rules must be able to
+            // tell "absent" from "empty" so they can report themselves skipped
+            assertThat(snapshot.settings()).isEmpty();
+            assertThat(snapshot.shards()).isEmpty();
+            assertThat(snapshot.indices()).isEmpty();
+            assertThat(snapshot.allocations()).isEmpty();
+            assertThat(snapshot.allocationExplain()).isEmpty();
+
+            // the required data is still fully usable
+            assertThat(snapshot.health().status()).isEqualTo(HealthStatus.GREEN);
+            assertThat(snapshot.nodesStats().dataNodeCount()).isEqualTo(3);
+        }
+
+        @Test
+        void absenceReasonQuotesTheRecordedCollectionFailure() {
+            ClusterSnapshot snapshot = parser.parse(Fixtures.load("required-only"));
+
+            assertThat(snapshot.absenceReason(CollectTarget.CLUSTER_SETTINGS))
+                    .isEqualTo("requires cluster_settings.json "
+                            + "(collection failed: HTTP 403: no permissions for [cluster:monitor/settings])");
+        }
+
+        @Test
+        void absenceReasonFallsBackWhenDumpRecordsNoOutcome() {
+            // what an older dump looks like: taken before the target existed,
+            // so its collection report says nothing about it
+            RawDump dump = withoutPayload(Fixtures.load("normal"), CollectTarget.CAT_INDICES);
+            ClusterSnapshot snapshot = parser.parse(new RawDump("""
+                    { "collected_at": "2026-07-16T08:00:00Z", "tool_version": "0.0.9" }
+                    """, dump.payloads()));
+
+            assertThat(snapshot.absenceReason(CollectTarget.CAT_INDICES))
+                    .isEqualTo("requires cat_indices.json (not in dump)");
+        }
+
+        @Test
+        void stillFailLoudlyWhenPresentButMalformed() {
+            // a broken payload is a broken dump, not a partial one
+            RawDump dump = withPayload(Fixtures.load("normal"), CollectTarget.CAT_SHARDS, "{ not json");
+
+            assertThatThrownBy(() -> parser.parse(dump))
+                    .isInstanceOf(SnapshotParseException.class)
+                    .hasMessageContaining("cat_shards.json");
+        }
+    }
+
+    @Nested
+    class ForwardCompatibility {
+
+        @Test
+        void readsDumpsFromNewerToolsBestEffort() {
+            RawDump normal = Fixtures.load("normal");
+            RawDump fromNewerTool = new RawDump("""
+                    {
+                      "dump_schema_version": 99,
+                      "collected_at": "2026-07-16T08:00:00Z",
+                      "tool_version": "9.9.9",
+                      "cluster_name": "fixture-cluster",
+                      "cluster_version": "3.0.0",
+                      "some_field_we_do_not_know": true,
+                      "collection": [
+                        { "target": "CLUSTER_HEALTH", "status": "OK", "http_status": 200 },
+                        { "target": "HOT_THREADS", "status": "OK", "http_status": 200 },
+                        { "target": "NODES_STATS", "status": "PARTIAL", "http_status": 206 }
+                      ]
+                    }
+                    """, normal.payloads());
+
+            SnapshotMetadata metadata = parser.parse(fromNewerTool).metadata();
+
+            assertThat(metadata.isNewerThanSupported()).isTrue();
+            // the unknown target is dropped, the known ones survive
+            assertThat(metadata.collection()).hasSize(2);
+            assertThat(metadata.outcomeOf(CollectTarget.CLUSTER_HEALTH)).isPresent();
+            // an unknown status maps to UNKNOWN rather than failing the read
+            assertThat(metadata.outcomeOf(CollectTarget.NODES_STATS).orElseThrow().status())
+                    .isEqualTo(CollectionOutcome.Status.UNKNOWN);
+        }
+
+        @Test
+        void assumesSchemaVersionOneWhenFieldIsAbsent() {
+            RawDump normal = Fixtures.load("normal");
+            RawDump preSchemaVersion = new RawDump("""
+                    { "collected_at": "2026-07-16T08:00:00Z", "tool_version": "0.0.9" }
+                    """, normal.payloads());
+
+            SnapshotMetadata metadata = parser.parse(preSchemaVersion).metadata();
+            assertThat(metadata.dumpSchemaVersion()).isEqualTo(1);
+            assertThat(metadata.isNewerThanSupported()).isFalse();
+            assertThat(metadata.collection()).isEmpty();
+        }
     }
 
     private static RawDump withPayload(RawDump dump, CollectTarget target, String json) {
         Map<CollectTarget, String> payloads = new HashMap<>(dump.payloads());
         payloads.put(target, json);
+        return new RawDump(dump.metadataJson(), payloads);
+    }
+
+    private static RawDump withoutPayload(RawDump dump, CollectTarget target) {
+        Map<CollectTarget, String> payloads = new HashMap<>(dump.payloads());
+        payloads.remove(target);
         return new RawDump(dump.metadataJson(), payloads);
     }
 }

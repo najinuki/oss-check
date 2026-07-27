@@ -6,6 +6,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.cfg.EnumFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.function.Function;
 
 /**
  * Turns a {@link RawDump} into a fully typed {@link ClusterSnapshot}.
@@ -24,23 +26,48 @@ public final class ClusterSnapshotParser {
     private final JsonMapper mapper = JsonMapper.builder()
             .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            // Forward compatibility: a dump from a newer tool may name collect
+            // targets or statuses this version has no constant for. Those
+            // become null and are dropped, rather than failing the whole read.
+            .enable(EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
             .build();
 
     public ClusterSnapshot parse(RawDump dump) {
         SnapshotMetadata metadata = readValue(CollectTarget.METADATA_FILE_NAME, dump.metadataJson(), SnapshotMetadata.class);
         ClusterHealth health = readValue(required(dump, CollectTarget.CLUSTER_HEALTH), CollectTarget.CLUSTER_HEALTH, ClusterHealth.class);
-        ClusterSettings settings = parseSettings(required(dump, CollectTarget.CLUSTER_SETTINGS));
-        Optional<AllocationExplain> allocationExplain = parseAllocationExplain(dump.payload(CollectTarget.ALLOCATION_EXPLAIN));
         NodesStats nodesStats = parseNodesStats(required(dump, CollectTarget.NODES_STATS));
-        List<ShardEntry> shards = parseCatShards(required(dump, CollectTarget.CAT_SHARDS));
-        List<IndexEntry> indices = parseCatIndices(required(dump, CollectTarget.CAT_INDICES));
-        List<NodeAllocation> allocations = parseCatAllocation(required(dump, CollectTarget.CAT_ALLOCATION));
-        return new ClusterSnapshot(metadata, health, settings, allocationExplain, nodesStats, shards, indices, allocations);
+        return new ClusterSnapshot(
+                metadata,
+                health,
+                nodesStats,
+                optional(dump, CollectTarget.CLUSTER_SETTINGS, this::parseSettings),
+                parseAllocationExplain(dump.payload(CollectTarget.ALLOCATION_EXPLAIN)),
+                optional(dump, CollectTarget.CAT_SHARDS, this::parseCatShards),
+                optional(dump, CollectTarget.CAT_INDICES, this::parseCatIndices),
+                optional(dump, CollectTarget.CAT_ALLOCATION, this::parseCatAllocation));
     }
 
+    /**
+     * A REQUIRED target is one without which no rule could run, so its absence
+     * is an execution error rather than a diagnosis with gaps.
+     */
     private static String required(RawDump dump, CollectTarget target) {
         return dump.payload(target).orElseThrow(
                 () -> new SnapshotParseException("Dump is missing required file: " + target.fileName()));
+    }
+
+    /**
+     * An OPTIONAL target that is absent yields an empty field. It is never
+     * replaced with an empty value: rules must be able to tell "absent" from
+     * "empty" so they report themselves skipped instead of not firing.
+     *
+     * <p>A payload that is present but malformed still fails loudly — that is a
+     * broken dump, not a partial one.
+     */
+    private static <T> Optional<T> optional(RawDump dump, CollectTarget target, Function<String, T> parse) {
+        return dump.payload(target)
+                .filter(payload -> !payload.isBlank())
+                .map(parse);
     }
 
     private <T> T readValue(String json, CollectTarget target, Class<T> type) {

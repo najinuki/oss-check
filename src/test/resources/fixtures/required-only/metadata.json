@@ -1,0 +1,16 @@
+{
+  "dump_schema_version": 1,
+  "collected_at": "2026-07-16T08:00:00Z",
+  "tool_version": "0.1.0-SNAPSHOT",
+  "cluster_name": "fixture-cluster",
+  "cluster_version": "2.19.1",
+  "collection": [
+    { "target": "CLUSTER_HEALTH", "status": "OK", "http_status": 200 },
+    { "target": "NODES_STATS", "status": "OK", "http_status": 200 },
+    { "target": "CLUSTER_SETTINGS", "status": "FAILED", "http_status": 403, "message": "no permissions for [cluster:monitor/settings]" },
+    { "target": "ALLOCATION_EXPLAIN", "status": "FAILED", "http_status": 403, "message": "no permissions for [cluster:monitor/allocation/explain]" },
+    { "target": "CAT_SHARDS", "status": "FAILED", "http_status": 403, "message": "no permissions for [indices:monitor/stats]" },
+    { "target": "CAT_INDICES", "status": "FAILED", "http_status": 403, "message": "no permissions for [indices:monitor/stats]" },
+    { "target": "CAT_ALLOCATION", "status": "FAILED", "http_status": 403, "message": "no permissions for [indices:monitor/stats]" }
+  ]
+}

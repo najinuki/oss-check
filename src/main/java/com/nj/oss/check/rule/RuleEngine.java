@@ -2,13 +2,13 @@ package com.nj.oss.check.rule;
 
 import com.nj.oss.check.snapshot.ClusterSnapshot;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 
 /**
- * Runs every registered rule against a snapshot and returns the findings,
- * most severe first (ties broken by rule id).
+ * Runs every registered rule against a snapshot and collects both what fired
+ * and what could not be evaluated.
  */
 public final class RuleEngine {
 
@@ -18,11 +18,21 @@ public final class RuleEngine {
         this.rules = List.copyOf(rules);
     }
 
-    public List<Finding> run(ClusterSnapshot snapshot) {
-        return rules.stream()
-                .map(rule -> rule.evaluate(snapshot))
-                .flatMap(Optional::stream)
-                .sorted(Comparator.comparing(Finding::severity).thenComparing(Finding::ruleId))
-                .toList();
+    public DiagnosticReport run(ClusterSnapshot snapshot) {
+        List<Finding> findings = new ArrayList<>();
+        List<SkippedRule> skipped = new ArrayList<>();
+
+        for (DiagnosticRule rule : rules) {
+            switch (rule.evaluate(snapshot)) {
+                case RuleResult.Fired fired -> findings.add(fired.finding());
+                case RuleResult.Skipped skip -> skipped.add(new SkippedRule(rule.id(), skip.reason()));
+                case RuleResult.NotFired ignored -> {
+                }
+            }
+        }
+
+        findings.sort(Comparator.comparing(Finding::severity).thenComparing(Finding::ruleId));
+        skipped.sort(Comparator.comparing(SkippedRule::ruleId));
+        return new DiagnosticReport(findings, skipped);
     }
 }

@@ -17,7 +17,9 @@
 
 - **Java 25** + **Spring Boot** + **picocli** (CLI 파싱)
 - 배포: **단일 실행 uber-jar** (`java -jar os-check.jar`). Java 25 외 런타임 의존성 없음.
-- OpenSearch 지원 버전: **2.x 우선**, 1.3.x는 best-effort (README에 명시)
+- OpenSearch 지원 버전: **2.10 ~ 3.x**. 2.10 미만(1.x 포함)은 **미지원**으로 README에 명시.
+  하한을 2.10으로 잡은 이유는 그 이전 버전에서만 존재하는 API 형태를 파서가 분기 처리하지
+  않기 위해서다. 상한 3.x는 수집 엔드포인트의 응답 구조가 2.x와 호환되는 범위까지를 뜻한다.
 - 출력 언어: **영문 단일**
 
 Spring Boot 선택 이유: 개발자 생산성 + v0.2의 MCP 서버 모드(장기 실행 프로세스) 확장 기반.
@@ -29,17 +31,63 @@ CLI 도구치고 무겁다는 트레이드오프는 인지하고 수용한 결�
 
 폐쇄망에서 덤프를 반출해 외부에서 분석하는 시나리오용.
 
-- **수집 엔드포인트 (고정 목록)**:
-    - `_cluster/health`
-    - `_cluster/settings?include_defaults=true`
-    - `_cluster/allocation/explain`
-    - `_nodes/stats`
-    - `_cat/shards?format=json`
-    - `_cat/indices?format=json`
-    - `_cat/allocation?format=json`
+사용자는 접속 정보만 준다. 엔드포인트를 하나씩 호출하는 일은 collect가 전부 대신한다.
+
 - **접속 옵션**: `--endpoint`, `--user` / `--password` (환경변수 대체 가능), `--insecure` (자체 서명 인증서 허용)
-- **출력물에 메타데이터 파일 포함**: 수집 시각, 도구 버전, 클러스터 이름/버전
 - 외부 통신은 대상 클러스터 단 하나뿐
+
+#### 수집 엔드포인트와 필수/선택 등급
+
+엔드포인트 목록은 앞으로 늘어난다는 전제로 설계한다. 따라서 각 타깃은 **필수(REQUIRED) /
+선택(OPTIONAL)** 등급을 갖는다.
+
+| 엔드포인트 | 아카이브 파일명 | 등급 |
+|---|---|---|
+| `_cluster/health` | `cluster_health.json` | **REQUIRED** |
+| `_nodes/stats` | `nodes_stats.json` | **REQUIRED** |
+| `_cluster/settings?include_defaults=true` | `cluster_settings.json` | OPTIONAL |
+| `_cluster/allocation/explain` | `allocation_explain.json` | OPTIONAL |
+| `_cat/shards?format=json&bytes=b` | `cat_shards.json` | OPTIONAL |
+| `_cat/indices?format=json&bytes=b` | `cat_indices.json` | OPTIONAL |
+| `_cat/allocation?format=json&bytes=b` | `cat_allocation.json` | OPTIONAL |
+
+- **REQUIRED 판정 기준**: 이 파일이 없으면 "클러스터 스냅샷"이라 부를 것이 성립하지 않고
+  어떤 룰도 돌 수 없는 것만 필수다. 누락 시 `SnapshotParseException` → 종료 코드 2 (시끄럽게 실패).
+- **OPTIONAL 누락 시**: 스냅샷의 해당 필드는 `Optional.empty()`가 되고, 그 데이터를 필요로 하는
+  룰만 SKIPPED 처리된다(4.4). 진단 전체는 계속 진행한다.
+- **빈 값으로 대체하지 않는다.** 예를 들어 `cluster_settings.json`이 없을 때 빈 설정 맵을 넣으면
+  "설정이 비어 있다"와 "설정을 못 읽었다"가 구분되지 않아 미탐으로 이어진다. 반드시 `Optional`이다.
+- **새 엔드포인트의 기본 등급은 항상 OPTIONAL.** 이 규칙이 덤프 하위호환을 구조적으로 보장한다
+  (구버전으로 뜬 덤프를 신버전이 열 수 있음). REQUIRED 승격은 덤프 스키마 버전을 올리는 변경이다.
+
+부분 수집 실패(권한 부족 403, 타임아웃, 버전에 따라 없는 API)는 엔드포인트가 늘어날수록
+정상 상태에 가까워진다. 하나 실패했다고 진단 전체가 죽어서는 안 된다.
+
+#### 메타데이터 파일 (`metadata.json`)
+
+수집 시각·도구 버전·클러스터 이름/버전에 더해 **덤프 스키마 버전**과 **수집 리포트**를 담는다.
+
+```json
+{
+  "dumpSchemaVersion": 1,
+  "collectedAt": "2026-07-27T04:11:00Z",
+  "toolVersion": "0.1.0",
+  "clusterName": "prod-search",
+  "clusterVersion": "2.19.1",
+  "collection": [
+    { "target": "CLUSTER_HEALTH",     "status": "OK",     "httpStatus": 200 },
+    { "target": "ALLOCATION_EXPLAIN", "status": "FAILED", "httpStatus": 400, "message": "unable to find any unassigned shards" },
+    { "target": "CAT_INDICES",        "status": "FAILED", "httpStatus": 403, "message": "no permissions for [indices:monitor/stats]" }
+  ]
+}
+```
+
+- **수집 리포트가 있어야 "왜 이 룰이 안 돌았나"를 덤프 하나만 보고 답할 수 있다.**
+  덤프는 폐쇄망에서 반출돼 몇 달 뒤 다른 곳에서 열리는 물건이므로, 수집 당시의 실패 사유가
+  파일 안에 남아 있지 않으면 재현이 불가능하다.
+- `dumpSchemaVersion`은 **구조가 깨지는 변경에만** 올린다. 엔드포인트 추가는(OPTIONAL이므로) 올리지 않는다.
+- **아카이브 안의 모르는 파일은 무시한다.** 신버전으로 뜬 덤프를 구버전이 여는 경우를 위한 전방 호환.
+- 덤프 스키마 버전이 리더가 아는 것보다 높으면 경고만 남기고 아는 파일로 진행한다.
 
 ### 3.2 `diagnose` — 룰 엔진 실행
 
@@ -48,6 +96,8 @@ CLI 도구치고 무겁다는 트레이드오프는 인지하고 수용한 결�
 - **입력 포맷은 tar.gz 단일로 못 박는다** (개별 JSON 파일/디렉토리 입력은 백로그)
 - **출력**: 사람이 읽는 텍스트(기본) + `--format json`
 - **종료 코드**: `0` = 발견 없음 / `1` = 발견 있음 / `2` = 실행 오류 (스크립트·cron 연동용)
+    - **SKIPPED 룰이 있어도 종료 코드는 바뀌지 않는다.** 종료 코드는 오직 finding 유무로 정한다.
+      데이터 부족은 리포트 본문과 `--format json`의 `skipped` 배열로만 알린다 (스크립트 연동 호환 유지).
 
 ## 4. 룰 아키텍처 (확정)
 
@@ -63,7 +113,7 @@ v0.1에서 룰은 Java 클래스로 하드코딩한다. YAML/JSON 룰 정의, �
 public interface DiagnosticRule {
     String id();                 // "OSC-001" 형식
     Severity severity();         // CRITICAL / WARNING / INFO
-    Optional<Finding> evaluate(ClusterSnapshot snapshot);
+    RuleResult evaluate(ClusterSnapshot snapshot);
 }
 ```
 
@@ -76,7 +126,35 @@ public interface DiagnosticRule {
     - `evidence` — 어떤 API의 어떤 필드 값이 근거인지 (예: `nodes.stats.breakers.parent.tripped = 847`)
     - `recommendation` — 실행 가능한 조치 (구체적 API 호출 예시 포함)
 
-### 4.3 임계값 처리
+### 4.3 룰 결과는 3-상태다 (`RuleResult`)
+
+`Optional<Finding>`은 **"발화 안 함"과 "판단할 데이터가 없음"을 구분하지 못한다.** 둘 다 빈 값이
+되므로, 데이터가 없어서 못 본 것이 조용한 미탐(false negative)으로 흘러간다. 엔드포인트가
+OPTIONAL을 가지는 이상(3.1) 이 구분은 필수다.
+
+```java
+public sealed interface RuleResult {
+    record Fired(Finding finding) implements RuleResult {}   // 발화
+    record NotFired() implements RuleResult {}               // 정상 — 조건 미충족
+    record Skipped(String reason) implements RuleResult {}   // 판단 불가 — 필요한 데이터 없음
+}
+```
+
+- `Skipped.reason`은 사람이 읽을 사유다. 예: `"requires cluster_settings (not in dump)"`.
+- **`RuleEngine`은 `List<Finding>`이 아니라 `DiagnosticReport`를 반환한다**:
+  발화한 finding 목록 + SKIPPED 룰 목록(룰 ID·사유).
+- 리포트 출력에 SKIPPED 섹션을 반드시 노출한다:
+
+```
+SKIPPED (2 rules could not be evaluated)
+  OSC-002  requires cluster_settings (collection failed: HTTP 403)
+  OSC-003  requires cluster_settings (collection failed: HTTP 403)
+```
+
+이는 결정 로그의 "조용히 넘어가면 미탐으로 이어진다 — 시끄럽게 실패한다" 원칙과 같은 계열이다.
+다만 SKIPPED는 실행 오류가 아니므로 종료 코드를 바꾸지 않는다(3.2).
+
+### 4.4 임계값 처리
 
 - 룰 안의 임계값은 전부 **명명된 상수** (예: `SHARD_USAGE_WARNING_THRESHOLD = 0.9`)
 - 각 상수에 **근거 주석** 필수
@@ -91,6 +169,19 @@ public interface DiagnosticRule {
 | OSC-002 | CRITICAL / WARNING | **샤드 한도 고갈**: `max_shards_per_node × 데이터노드 수`(설정에서 읽음) vs 현재 샤드 수. 한도 도달 = CRITICAL, 90% 이상 근접 = WARNING |
 | OSC-003 | CRITICAL | **`cluster.routing.allocation.enable: none` 오설정**: settings에서 감지 + health RED / unassigned shards와 연결해 인과 관계 서술 |
 
+각 룰이 필요로 하는 OPTIONAL 타깃(없으면 SKIPPED):
+
+| 룰 | 필요한 OPTIONAL 타깃 |
+|---|---|
+| OSC-001 | `cat_indices` (`top_queries-*` 존재/크기 확인용) |
+| OSC-002 | `cluster_settings`, `cat_shards` |
+| OSC-003 | `cluster_settings` (+ `allocation_explain`은 있으면 근거 보강, 없어도 발화 가능) |
+
+> OSC-001의 `top_queries-*` 부분은 Query Insights 플러그인의 로컬 인덱스 익스포터가 켜진
+> 클러스터에서만 성립한다. 해당 인덱스가 없으면 브레이커 트립 + heap 근거만으로 발화하고,
+> 쿼리 인사이트 방치 패턴은 언급하지 않는다 (룰 자체를 SKIPPED하지는 않는다).
+> 플러그인 도입 최소 버전은 룰 구현 시점에 실제 클러스터로 확인해 확정한다.
+
 ## 6. 테스트 전략
 
 **픽스처 = 실제 API 응답 형태의 JSON 덤프** (`src/test/resources`). offline 모드가 곧 테스트 하네스.
@@ -100,6 +191,15 @@ public interface DiagnosticRule {
 1. **양성(positive)**: 장애 시점 덤프 → 룰이 반드시 탐지. finding 내용과 evidence 필드 값까지 assert
 2. **음성(negative)**: 정상 클러스터 덤프 → 절대 발화 금지. 오탐 방어선 (오탐이 미탐보다 도구 신뢰를 더 죽인다)
 3. **경계(edge)**: 임계 근처 값 (예: 샤드 사용률 89% vs 91%) → 발화 기준 정확성 검증
+
+### 덤프 결손 픽스처 (룰 3종 세트와 별개)
+
+OPTIONAL 타깃이 빠진 덤프를 별도로 둔다. 검증 대상은 두 가지다:
+
+- REQUIRED만 있는 덤프 → 파싱 성공 + 해당 룰들이 **SKIPPED로 보고**됨 (조용히 NotFired 되지 않음)
+- REQUIRED 누락 덤프 → `SnapshotParseException` (종료 코드 2)
+
+이 픽스처가 엔드포인트 확장 시의 하위호환 회귀 테스트 역할도 한다.
 
 ### 보조 수단
 
@@ -132,11 +232,24 @@ public interface DiagnosticRule {
 - `fix` 명령: dry-run 우선, 되돌리기 가능한 조치만
 - 임계값 외부화 (`--config thresholds.yaml`)
 - 개별 JSON 파일 입력 지원
+- `collect --print-script`: 동일한 tar.gz 레이아웃을 만드는 curl 스크립트 출력.
+  폐쇄망에서 **클러스터에 닿는 호스트에 Java 25 런타임을 올릴 수 없는** 경우의 탈출구.
+  실제 그 요구가 확인되기 전까지는 만들지 않는다 (명령 2개 원칙에 붙는 군더더기)
 
 ## 9. 다음 작업 (현재 위치)
 
 1. ~~`ClusterSnapshot` 필드 설계~~ ✅ 완료 — `snapshot` 패키지 (모델 record + `ClusterSnapshotParser`)
 2. ~~프로젝트 골격: 디렉토리 구조, 룰 엔진 인터페이스, 수집기 계층~~ ✅ 완료 — `rule` 패키지(인터페이스·엔진), `collect` 패키지(`CollectTarget`/`RawDump`/`DumpSource` 경계)
-3. collect 구현 → diagnose offline 모드 → 룰 3개 → live 모드 순서 권장 ← **여기부터 시작**
+3. ~~**엔드포인트 확장 대비 리팩터링** (3.1 / 4.3 반영)~~ ✅ 완료
+    - ~~`CollectTarget`에 REQUIRED/OPTIONAL 등급 추가~~ — REQUIRED는 health·nodes_stats 둘뿐
+    - ~~`ClusterSnapshotParser`: OPTIONAL 타깃 → `Optional` 필드 (빈 값 대체 금지)~~
+    - ~~`SnapshotMetadata`에 `dumpSchemaVersion` + 수집 리포트 필드 추가~~ — `CollectionOutcome`
+    - ~~`DiagnosticRule.evaluate` 반환 타입 → `RuleResult`, `RuleEngine` → `DiagnosticReport`~~
+    - 덤프 결손 픽스처(`fixtures/required-only/`) + 전방 호환 테스트 추가
+4. collect 구현 (HTTP 수집기 + tar.gz 생성) → diagnose offline 모드 → 룰 3개 → live 모드
+   ← **여기부터 시작**
+
+3번을 4번보다 먼저 한 이유: 룰 3개를 만든 뒤에 `RuleResult`로 바꾸면 룰과 룰 테스트를
+전부 다시 손봐야 한다. 룰 시그니처가 굳지 않은 시점이 비용이 가장 낮았다.
 
 구현 구조와 진행 중 내린 세부 결정(결정 로그)은 [IMPLEMENTATION.md](IMPLEMENTATION.md) 참고.
