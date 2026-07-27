@@ -162,7 +162,21 @@ class ClusterSnapshotParserTest {
 
         assertThat(metadata.dumpSchemaVersion()).isEqualTo(SnapshotMetadata.CURRENT_DUMP_SCHEMA_VERSION);
         assertThat(metadata.isNewerThanSupported()).isFalse();
-        assertThat(metadata.collection()).hasSize(CollectTarget.values().length);
+
+        // This fixture records only the seven targets that existed when it was
+        // taken, so the report is deliberately not asserted against the current
+        // target count: a dump older than the target list is the normal case
+        // the OPTIONAL grade exists for.
+        assertThat(metadata.collection()).extracting(CollectionOutcome::target)
+                .containsExactly(
+                        CollectTarget.CLUSTER_HEALTH,
+                        CollectTarget.NODES_STATS,
+                        CollectTarget.CLUSTER_SETTINGS,
+                        CollectTarget.ALLOCATION_EXPLAIN,
+                        CollectTarget.CAT_SHARDS,
+                        CollectTarget.CAT_INDICES,
+                        CollectTarget.CAT_ALLOCATION);
+        assertThat(metadata.outcomeOf(CollectTarget.CAT_SEGMENTS)).isEmpty();
 
         assertThat(metadata.outcomeOf(CollectTarget.CLUSTER_HEALTH).orElseThrow().isOk()).isTrue();
 

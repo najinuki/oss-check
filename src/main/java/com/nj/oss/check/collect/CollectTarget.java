@@ -22,7 +22,15 @@ public enum CollectTarget {
     ALLOCATION_EXPLAIN("_cluster/allocation/explain", "allocation_explain.json", Requirement.OPTIONAL),
     CAT_SHARDS("_cat/shards?format=json&bytes=b", "cat_shards.json", Requirement.OPTIONAL),
     CAT_INDICES("_cat/indices?format=json&bytes=b", "cat_indices.json", Requirement.OPTIONAL),
-    CAT_ALLOCATION("_cat/allocation?format=json&bytes=b", "cat_allocation.json", Requirement.OPTIONAL);
+    CAT_ALLOCATION("_cat/allocation?format=json&bytes=b", "cat_allocation.json", Requirement.OPTIONAL),
+    CLUSTER_PENDING_TASKS("_cluster/pending_tasks", "cluster_pending_tasks.json", Requirement.OPTIONAL),
+    CLUSTER_STATS("_cluster/stats", "cluster_stats.json", Requirement.OPTIONAL),
+    CAT_NODES("_cat/nodes?format=json&full_id=true&bytes=b", "cat_nodes.json", Requirement.OPTIONAL),
+    CAT_RECOVERY("_cat/recovery?format=json&active_only=true&bytes=b", "cat_recovery.json", Requirement.OPTIONAL),
+    CAT_SEGMENTS("_cat/segments?format=json&bytes=b", "cat_segments.json", Requirement.OPTIONAL),
+    CAT_PLUGINS("_cat/plugins?format=json", "cat_plugins.json", Requirement.OPTIONAL),
+    CAT_FIELDDATA("_cat/fielddata?format=json&bytes=b", "cat_fielddata.json", Requirement.OPTIONAL),
+    INDEX_TEMPLATES("_index_template", "index_templates.json", Requirement.OPTIONAL);
 
     /**
      * Whether a dump is usable at all without this target.
