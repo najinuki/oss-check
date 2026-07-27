@@ -1,4 +1,4 @@
-package com.nj.oss.check.snapshot;
+package com.nj.oss.check.snapshot.parse;
 
 import org.junit.jupiter.api.Test;
 

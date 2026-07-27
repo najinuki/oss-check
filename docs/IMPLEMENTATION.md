@@ -10,13 +10,21 @@
 ```
 com.nj.oss.check
 ├── OssCheckApplication          # Spring Boot 진입점 (CLI 와이어링은 4단계에서)
-├── snapshot/                    # ClusterSnapshot 모델 + 파서 (순수 Java)
+├── snapshot/                    # ClusterSnapshot 모델 (record·enum, 순수 Java)
+│   └── parse/                   # wire format을 아는 유일한 곳 (파서·예외)
 ├── rule/                        # 룰 엔진 + 룰 공통 타입 (순수 Java)
+│   └── catalog/                 # 룰 구현체 (OSC-001 작성 시 생성, 결정 15)
 └── collect/                     # 수집 계층 경계 (HTTP 수집기·tar.gz 리더는 4단계에서)
 ```
 
 **core 패키지(snapshot/rule/collect)는 Spring 비의존.** 순수 Java로 유지해 테스트를
 가볍게 하고, Spring 와이어링(DI, picocli 통합)은 CLI 계층에서만 한다.
+
+패키지는 **"무엇에 대한 것인가"로만 나눈다.** record/enum과 클래스를 갈라놓는
+`entity/`·`model/`류 분리는 하지 않는다 — 이 프로젝트의 record 대부분이 도메인 로직을
+들고 있어서(`ClusterSettings.effective()`의 설정 우선순위, `CollectTarget.isRequired()`의
+필수/선택 정책, `ClusterSnapshot.absenceReason()`) 그 분리는 이름과 내용이 어긋난다.
+게다가 같이 변하는 것들(타깃 추가 = `CollectTarget` + 파서 + 스냅샷)을 갈라놓는다.
 
 ## 2. `snapshot` 패키지 — ClusterSnapshot 필드 설계
 
@@ -58,9 +66,17 @@ requires cluster_settings.json (collection failed: HTTP 403: no permissions for 
 requires cat_indices.json (not in dump)          # 리포트에 기록이 없는 경우(구버전 덤프)
 ```
 
-### 파서 (`ClusterSnapshotParser`)
+### 파서 (`snapshot.parse` 패키지)
 
-각 API의 wire format을 아는 유일한 장소. `RawDump` → `ClusterSnapshot` 변환.
+각 API의 wire format을 아는 유일한 장소. 이 규칙을 디렉토리로 드러내려고 모델과 분리했다.
+OpenSearch 버전에 따라 응답 형태가 갈리는 분기가 생기면 전부 이 패키지 안에 가둔다.
+
+- `ClusterSnapshotParser` — `RawDump` → `ClusterSnapshot` 변환
+- `SizeParser` — `"1.2gb"` 같은 사람용 사이즈 문자열 파싱. **package-private**이라
+  모델 패키지에서 보이지 않는다 (이동 후 가시 범위가 오히려 좁아졌다)
+- `SnapshotParseException`
+
+`RawDump` → `ClusterSnapshot` 변환 규칙:
 
 - REQUIRED 타깃 누락 → `SnapshotParseException` (종료 코드 2)
 - OPTIONAL 타깃 누락/빈 payload → 해당 필드 `Optional.empty()`
@@ -147,6 +163,7 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 12 | 덤프 스키마 버전 경고를 core에서 출력하지 않음 | core는 로깅 프레임워크 비의존(결정 5). `SnapshotMetadata.isNewerThanSupported()`로 사실만 노출하고 출력은 CLI 계층이 정한다 |
 | 13 | 모르는 `CollectTarget`/`Status`는 드롭·`UNKNOWN` 흡수 (`EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL`) | 신버전 덤프를 구버전 도구로 여는 전방 호환. 결정 6(시끄럽게 실패)의 예외인데, 이건 **덤프 파손이 아니라 어휘 차이**라 진단 자체는 문제없이 진행된다 |
 | 14 | `dumpSchemaVersion`만 `Integer`(boxed) | Jackson 3는 `FAIL_ON_NULL_FOR_PRIMITIVES`가 기본 활성이라 필드 없는 구버전 덤프에서 `int` 매핑이 깨진다. 전역으로 끄면 다른 곳(예: health 카운트류)의 loud-fail까지 약해지므로 해당 필드만 boxed로 두고 compact 생성자에서 1로 정규화 |
+| 15 | 룰 구현체는 `rule.catalog` 패키지로 분리 (**아직 미생성**) | 룰은 3개에서 20개 이상으로 늘어난다(AUTOOPS는 59종). 프레임워크 타입(`DiagnosticRule`/`RuleEngine`/`Finding`…)과 구현체가 한 디렉토리에 섞이면 그때는 탐색이 불가능해진다. 이름을 `rules`로 하면 `rule.rules`로 겹치고 `impl`은 의미가 없어 `catalog`를 골랐다(AUTOOPS 벤치마크 문서도 룰 모음을 "체크 카탈로그"라 부른다). **지금 만들면 빈 패키지이므로 OSC-001 작성 시점에 만든다** |
 
 ## 7. 다음 단계
 

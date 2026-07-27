@@ -2,7 +2,7 @@ package com.nj.oss.check.rule;
 
 import com.nj.oss.check.collect.CollectTarget;
 import com.nj.oss.check.snapshot.ClusterSnapshot;
-import com.nj.oss.check.snapshot.ClusterSnapshotParser;
+import com.nj.oss.check.snapshot.parse.ClusterSnapshotParser;
 import com.nj.oss.check.testsupport.Fixtures;
 import org.junit.jupiter.api.Test;
 

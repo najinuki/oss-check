@@ -1,8 +1,18 @@
-package com.nj.oss.check.snapshot;
+package com.nj.oss.check.snapshot.parse;
 
 import com.nj.oss.check.collect.CollectTarget;
 import com.nj.oss.check.collect.CollectionOutcome;
 import com.nj.oss.check.collect.RawDump;
+import com.nj.oss.check.snapshot.AllocationExplain;
+import com.nj.oss.check.snapshot.ClusterHealth;
+import com.nj.oss.check.snapshot.ClusterSettings;
+import com.nj.oss.check.snapshot.ClusterSnapshot;
+import com.nj.oss.check.snapshot.HealthStatus;
+import com.nj.oss.check.snapshot.IndexEntry;
+import com.nj.oss.check.snapshot.NodeAllocation;
+import com.nj.oss.check.snapshot.NodesStats;
+import com.nj.oss.check.snapshot.ShardEntry;
+import com.nj.oss.check.snapshot.SnapshotMetadata;
 import com.nj.oss.check.testsupport.Fixtures;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;

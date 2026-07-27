@@ -1,4 +1,4 @@
-package com.nj.oss.check.snapshot;
+package com.nj.oss.check.snapshot.parse;
 
 /** Thrown when a dump is missing required data or contains unparseable JSON. */
 public class SnapshotParseException extends RuntimeException {

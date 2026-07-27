@@ -1,7 +1,16 @@
-package com.nj.oss.check.snapshot;
+package com.nj.oss.check.snapshot.parse;
 
 import com.nj.oss.check.collect.CollectTarget;
 import com.nj.oss.check.collect.RawDump;
+import com.nj.oss.check.snapshot.AllocationExplain;
+import com.nj.oss.check.snapshot.ClusterHealth;
+import com.nj.oss.check.snapshot.ClusterSettings;
+import com.nj.oss.check.snapshot.ClusterSnapshot;
+import com.nj.oss.check.snapshot.IndexEntry;
+import com.nj.oss.check.snapshot.NodeAllocation;
+import com.nj.oss.check.snapshot.NodesStats;
+import com.nj.oss.check.snapshot.ShardEntry;
+import com.nj.oss.check.snapshot.SnapshotMetadata;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;

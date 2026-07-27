@@ -1,4 +1,4 @@
-package com.nj.oss.check.snapshot;
+package com.nj.oss.check.snapshot.parse;
 
 import java.util.Locale;
 import java.util.Map;
