@@ -145,8 +145,6 @@ public interface DiagnosticRule {
 }
 ```
 
-- **`ClusterSnapshot`**: collect가 모은 모든 API 응답을 파싱해 담은 **불변 객체**.
-  룰은 이것만 보고 판단하며, live/offline 모드 여부를 전혀 알지 못한다.
 - **`Finding` 출력 구조 (모든 룰 통일)**:
     - `ruleId` — 예: `OSC-001`
     - `severity` — CRITICAL / WARNING / INFO
@@ -154,7 +152,38 @@ public interface DiagnosticRule {
     - `evidence` — 어떤 API의 어떤 필드 값이 근거인지 (예: `nodes.stats.breakers.parent.tripped = 847`)
     - `recommendation` — 실행 가능한 조치 (구체적 API 호출 예시 포함)
 
-### 4.3 룰 결과는 3-상태다 (`RuleResult`)
+### 4.3 룰이 보는 유일한 입력: `ClusterSnapshot`
+
+**OpenSearch 클러스터는 자기 상태를 하나의 API로 알려주지 않는다.** 클러스터가 건강한지는
+`_cluster/health`가, 각 노드의 메모리·서킷브레이커 상태는 `_nodes/stats`가, 샤드가 어느 노드에
+어떻게 놓였는지는 `_cat/shards`가, 운영자가 무슨 설정을 걸어놨는지는 `_cluster/settings`가
+따로 답한다. 장애 원인은 대개 이 응답들 **사이의 관계**에 있다 — 예를 들어 "샤드가 배정되지
+않는다"(health)의 원인이 "운영자가 allocation을 꺼놨다"(settings)인 식이다.
+
+`ClusterSnapshot`은 **그 API 응답들을 한 시점 기준으로 모아 파싱해 담은 불변 객체**다.
+클러스터의 어느 한 순간을 찍은 사진에 가깝다. 이 프로젝트의 진단이란 결국
+"이 사진 한 장 안에서 서로 모순되거나 위험한 조합을 찾아내는 일"이고,
+`ClusterSnapshot`은 그 사진의 자료형이다.
+
+이렇게 **하나의 객체로 묶는 이유**는 세 가지다:
+
+1. **교차 참조가 본체이기 때문.** 룰은 응답 하나만 보고 임계값을 넘겼는지 확인하는 게 아니라
+   여러 응답을 동시에 본다(1절). 한 덩어리로 들고 있지 않으면 룰마다 데이터를 다시 끌어모아야 한다.
+2. **시점을 고정하기 위해.** 룰이 실행 중에 API를 직접 호출하면 룰마다 다른 순간의 클러스터를
+   보게 되어, 근거(evidence)로 제시한 값들이 서로 다른 시점의 것이 된다. 스냅샷은 한 번 만들어지면
+   변하지 않으므로 리포트 안의 모든 근거가 같은 순간을 가리킨다.
+3. **live와 offline을 같은 코드로 처리하기 위해.** 아래 항목 참고.
+
+- **룰은 데이터의 출처를 알지 못한다.** `ClusterSnapshot`이 라이브 클러스터를 직접 찔러 만든
+  것인지 몇 달 전 tar.gz 덤프를 푼 것인지 룰은 구분할 수 없고, 구분할 필요도 없다.
+  덕분에 **룰을 한 번 쓰면 live 모드와 offline 모드 양쪽에서 그대로 동작하고**,
+  offline 모드가 곧 테스트 하네스가 된다(6절).
+- **룰은 스냅샷 밖으로 나가지 않는다.** 룰이 파일을 열거나 HTTP를 호출하면 위 세 가지가 전부
+  깨진다. 룰에 필요한 데이터가 없다면 스냅샷에 필드를 추가할 일이지 룰이 직접 가져올 일이 아니다.
+- **불변이므로 룰 실행 순서가 결과에 영향을 주지 않는다.** 어떤 룰도 다른 룰이 볼 데이터를
+  바꿔놓을 수 없다.
+
+### 4.4 룰 결과는 3-상태다 (`RuleResult`)
 
 `Optional<Finding>`은 **"발화 안 함"과 "판단할 데이터가 없음"을 구분하지 못한다.** 둘 다 빈 값이
 되므로, 데이터가 없어서 못 본 것이 조용한 미탐(false negative)으로 흘러간다. 엔드포인트가
@@ -182,7 +211,7 @@ SKIPPED (2 rules could not be evaluated)
 이는 결정 로그의 "조용히 넘어가면 미탐으로 이어진다 — 시끄럽게 실패한다" 원칙과 같은 계열이다.
 다만 SKIPPED는 실행 오류가 아니므로 종료 코드를 바꾸지 않는다(3.2).
 
-### 4.4 임계값 처리
+### 4.5 임계값 처리
 
 - 룰 안의 임계값은 전부 **명명된 상수** (예: `SHARD_USAGE_WARNING_THRESHOLD = 0.9`)
 - 각 상수에 **근거 주석** 필수
@@ -268,7 +297,7 @@ OPTIONAL 타깃이 빠진 덤프를 별도로 둔다. 검증 대상은 두 가�
 
 1. ~~`ClusterSnapshot` 필드 설계~~ ✅ 완료 — `snapshot` 패키지 (모델 record + `ClusterSnapshotParser`)
 2. ~~프로젝트 골격: 디렉토리 구조, 룰 엔진 인터페이스, 수집기 계층~~ ✅ 완료 — `rule` 패키지(인터페이스·엔진), `collect` 패키지(`CollectTarget`/`RawDump`/`DumpSource` 경계)
-3. ~~**엔드포인트 확장 대비 리팩터링** (3.1 / 4.3 반영)~~ ✅ 완료
+3. ~~**엔드포인트 확장 대비 리팩터링** (3.1 / 4.4 반영)~~ ✅ 완료
     - ~~`CollectTarget`에 REQUIRED/OPTIONAL 등급 추가~~ — REQUIRED는 health·nodes_stats 둘뿐
     - ~~`ClusterSnapshotParser`: OPTIONAL 타깃 → `Optional` 필드 (빈 값 대체 금지)~~
     - ~~`SnapshotMetadata`에 `dumpSchemaVersion` + 수집 리포트 필드 추가~~ — `CollectionOutcome`

@@ -28,8 +28,37 @@ com.nj.oss.check
 
 ## 2. `snapshot` 패키지 — ClusterSnapshot 필드 설계
 
-`ClusterSnapshot`은 collect가 모은 모든 API 응답을 파싱해 담은 불변 record다.
-룰이 보는 유일한 입력이며, live/offline 출처를 알지 못한다 (DESIGN.md 4.2).
+`ClusterSnapshot`은 OpenSearch 클러스터의 **어느 한 시점 상태를 API 응답들로 찍은 사진**을
+자바 객체로 옮긴 것이다. collect가 모은 응답을 전부 파싱해 담은 불변 record이며,
+룰이 보는 유일한 입력이고 live/offline 출처를 알지 못한다. 왜 이런 형태인지는 DESIGN.md 4.3.
+
+`snapshot` 패키지에 있는 record·enum은 **전부 이 사진의 부품**이다. 새로 보는 사람이
+가장 헷갈리는 지점이 여기라 풀어 쓴다 — 이들은 우리가 설계한 도메인 모델이 아니라
+**OpenSearch가 돌려주는 JSON 응답의 자바 표현**이다. 필드 이름이 어색해 보이면
+(`prirep`, `pri`, `rep`) 대개 OpenSearch API가 그렇게 부르기 때문이다.
+
+### 각 API가 무엇을 알려주는가
+
+진단에 필요한 정보가 하나의 API에 모여 있지 않다는 것이 이 패키지가 존재하는 이유다.
+
+| API | 한 줄로 | 이걸로 알 수 있는 것 |
+|---|---|---|
+| `_cluster/health` | 클러스터 **종합 진단서** | GREEN/YELLOW/RED, 노드 몇 대, 샤드 중 몇 개가 배정 안 됐는지. "문제가 있다"까지만 알려주고 원인은 말해주지 않는다 |
+| `_nodes/stats` | 노드별 **활력 징후** | 각 노드의 JVM heap 사용률, 서킷 브레이커가 몇 번 터졌는지, 스레드풀 큐 상태. 가장 크고 정보가 많은 응답 |
+| `_cluster/settings` | 운영자가 **손댄 설정** | `include_defaults=true`로 부르면 기본값까지 온다. 오설정 진단의 핵심 — "이 값이 기본값인가 누가 바꾼 것인가"를 구분해야 하기 때문 |
+| `_cluster/allocation/explain` | 샤드가 **배정 안 되는 이유** | 클러스터가 직접 설명해주는 유일한 API. 정상 클러스터에서는 설명할 게 없어 HTTP 400을 낸다(결정 2) |
+| `_cat/shards` | 샤드 **배치도** | 어느 인덱스의 몇 번 샤드가, 주샤드인지 복제본인지, 어느 노드에 있는지 |
+| `_cat/indices` | 인덱스 **목록** | 인덱스별 문서 수·용량·샤드 수 |
+| `_cat/allocation` | 노드별 **디스크 상황** | 노드마다 샤드 몇 개를 들고 디스크를 얼마나 쓰는지 |
+
+> **`_cat/*` API란**: 원래 사람이 터미널에서 읽으라고 만든 표 형식 API다. `format=json`을
+> 붙이면 각 행이 JSON 객체 하나인 배열로 온다. 컬럼 이름이 `docs.count`, `store.size`처럼
+> 점을 포함하고 값이 전부 문자열이라 파싱에 주의가 필요하다(결정 1의 `bytes=b`가 이 때문).
+
+여기에 collect가 직접 만들어 넣는 `metadata.json`이 더해진다 — 이건 클러스터가 준 게 아니라
+**우리가 언제·무엇을 수집했는지 기록한 것**이다(DESIGN.md 3.1).
+
+### 필드 매핑
 
 **REQUIRED 타깃 필드는 값 그대로, OPTIONAL 타깃 필드는 `Optional`**이다 (DESIGN.md 3.1).
 
@@ -50,8 +79,15 @@ com.nj.oss.check
 - **OSC-002**: `settings`의 `cluster.max_shards_per_node` × `nodesStats.dataNodeCount()` vs 현재 샤드 수
 - **OSC-003**: `settings`의 `cluster.routing.allocation.enable` + `health`의 status/unassigned + `allocationExplain`
 
+15개 타깃 중 **파싱되는 것은 위 7개뿐**이다. 나머지 8개(`cluster_stats`, `cat_nodes`,
+`cat_recovery`, `cat_segments`, `cat_plugins`, `cat_fielddata`, `cluster_pending_tasks`,
+`index_templates`)는 수집만 하고 아직 스냅샷 필드가 없다 — 룰이 실제로 요구할 때 추가한다
+(결정 8). 따라서 아카이브 파일 수와 스냅샷 필드 수가 다른 것이 정상이다.
+
 nullable 필드는 boxed 타입(`Long`, `Integer`)으로 표현한다
 (예: unassigned 샤드 행의 `docs`/`storeBytes`/`node`, closed 인덱스의 `docsCount`).
+**OpenSearch 응답에서 값이 빠질 수 있는 자리**를 타입으로 드러내는 것이다 — 배정되지 않은
+샤드는 아직 노드가 없어 `node`가 비고, 닫힌(closed) 인덱스는 문서 수를 보고하지 않는다.
 
 `Optional<List<...>>`는 다소 거추장스럽지만 의도적이다. 빈 리스트로 대체하면 "샤드가 없다"와
 "샤드 목록을 못 읽었다"가 같은 값이 되어 미탐으로 이어진다 (DESIGN.md 3.1).
@@ -91,7 +127,7 @@ DESIGN.md 4.2의 인터페이스를 그대로 구현:
   `severity()`는 룰의 명목(최악) 심각도이고, 실제 발생 건의 심각도는 `Finding`이 갖는다
   (OSC-002처럼 CRITICAL/WARNING 가변인 룰 대응).
 - `RuleResult` — sealed interface. `Fired(Finding)` / `NotFired` / `Skipped(reason)`.
-  DESIGN.md 4.3의 3-상태. `RuleResult.fired/notFired/skipped` 정적 팩토리 제공.
+  DESIGN.md 4.4의 3-상태. `RuleResult.fired/notFired/skipped` 정적 팩토리 제공.
 - `Finding` — ruleId / severity / finding(한 줄) / evidence 목록 / recommendation. 불변 record.
 - `Evidence(source, value)` — `render()`하면 `"nodes.stats.breakers.parent.tripped = 847"` 형태.
 - `Severity` — CRITICAL, WARNING, INFO. **enum 선언 순서가 곧 보고서 정렬 순서.**
@@ -157,7 +193,7 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 5 | core 패키지는 Spring 비의존 | 룰·파서 테스트가 Spring 컨텍스트 없이 도는 순수 단위 테스트. Spring/picocli 와이어링은 CLI 계층에서만 |
 | 6 | 필수 파일 누락·JSON 파손 시 즉시 예외 (`SnapshotParseException`) | 조용히 넘어가면 미탐으로 이어짐. 실행 오류는 종료 코드 2로 구분되므로(DESIGN.md 3.2) 시끄럽게 실패하는 것이 맞다 |
 | 7 | Jackson 3 (`tools.jackson`, Spring Boot 4 관리 버전) 사용 | Boot 4의 기본 Jackson 세대와 통일. Jackson 2를 별도 추가하면 uber-jar에 두 세대가 공존하게 됨 |
-| 8 | `CollectTarget`을 7개→15개로 확장 (`CLUSTER_PENDING_TASKS`, `CLUSTER_STATS`, `CAT_NODES`, `CAT_RECOVERY`, `CAT_SEGMENTS`, `CAT_PLUGINS`, `CAT_FIELDDATA`, `INDEX_TEMPLATES` 추가) | 초기 룰 3개가 요구하는 최소 필드만 모으던 원칙(DESIGN.md 4.3 인용 근거)을 넘어, 향후 룰이 필요로 할 만한 데이터를 미리 폭넓게 수집하기로 방향 전환. 근거: elastic/support-diagnostics(공식 진단 수집기)의 수집 목록과 AutoOps 이벤트 카탈로그(pending tasks, 플러그인 호환성, 세그먼트, fielddata 등)를 참고해 선정. HTTP 라이브 수집기가 아직 미구현 상태라 지금이 확장 비용이 가장 낮은 시점. **새 타깃은 아직 `ClusterSnapshotParser`가 파싱하지 않는다** — 룰이 실제로 필요로 할 때 파싱을 추가한다(수집과 파싱을 분리: collect는 넓게, parse는 룰 수요 기반) |
+| 8 | `CollectTarget`을 7개→15개로 확장 (`CLUSTER_PENDING_TASKS`, `CLUSTER_STATS`, `CAT_NODES`, `CAT_RECOVERY`, `CAT_SEGMENTS`, `CAT_PLUGINS`, `CAT_FIELDDATA`, `INDEX_TEMPLATES` 추가) | 초기 룰 3개가 요구하는 최소 필드만 모으던 원칙을 넘어, 향후 룰이 필요로 할 만한 데이터를 미리 폭넓게 수집하기로 방향 전환. 근거: elastic/support-diagnostics(공식 진단 수집기)의 수집 목록과 AutoOps 이벤트 카탈로그(pending tasks, 플러그인 호환성, 세그먼트, fielddata 등)를 참고해 선정. HTTP 라이브 수집기가 아직 미구현 상태라 지금이 확장 비용이 가장 낮은 시점. **새 타깃은 아직 `ClusterSnapshotParser`가 파싱하지 않는다** — 룰이 실제로 필요로 할 때 파싱을 추가한다(수집과 파싱을 분리: collect는 넓게, parse는 룰 수요 기반) |
 | 9 | REQUIRED는 `CLUSTER_HEALTH`·`NODES_STATS` 둘만 | 판정 기준을 "이게 없으면 어떤 룰도 못 도는가"로 잡음. 이 둘만 남기면 권한 제한·타임아웃으로 일부만 수집된 덤프도 진단 가능한 덤프가 된다. REQUIRED를 넓게 잡을수록 실패하는 덤프가 늘어난다. 결정 8로 타깃이 15개가 된 뒤 이 판정이 더 중요해졌다 — 8개는 파싱조차 하지 않으므로 REQUIRED일 수 없다 |
 | 10 | OPTIONAL 부재는 `Optional`, 빈 컬렉션 대체 금지 | "샤드가 없다"와 "샤드 목록을 못 읽었다"가 같은 값이 되면 룰이 조용히 NotFired 하고 미탐이 된다. `Optional<List<T>>`의 거추장스러움을 감수한 이유 |
 | 11 | payload가 있는데 파손이면 OPTIONAL이어도 예외 | 부분 덤프(partial)와 파손 덤프(broken)는 다른 상황이다. 전자는 계속 진행할 일이고 후자는 종료 코드 2로 알릴 일 |
