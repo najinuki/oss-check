@@ -16,7 +16,10 @@
 ## 2. 기술 스택 (확정)
 
 - **Java 25** + **Spring Boot** + **picocli** (CLI 파싱)
-- 배포: **단일 실행 uber-jar** (`java -jar os-check.jar`). Java 25 외 런타임 의존성 없음.
+- 배포: **Spring Boot fat jar** (`./gradlew bootJar` → `java -jar os-check.jar`).
+  대상 호스트에 **Java 25만 있으면 되고** 별도 설치가 필요 없다는 뜻이며,
+  라이브러리를 쓰지 않는다는 뜻이 아니다(의존성은 `BOOT-INF/lib/`에 jar 채로 중첩된다).
+  섀도잉으로 클래스를 펼치는 진짜 uber-jar가 아니므로 클래스 충돌·relocation 문제가 없다.
 - OpenSearch 지원 버전: **2.10 ~ 3.x**. 2.10 미만(1.x 포함)은 **미지원**으로 README에 명시.
   하한을 2.10으로 잡은 이유는 그 이전 버전에서만 존재하는 API 형태를 파서가 분기 처리하지
   않기 위해서다. 상한 3.x는 수집 엔드포인트의 응답 구조가 2.x와 호환되는 범위까지를 뜻한다.

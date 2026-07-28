@@ -25,7 +25,7 @@ OpenSearch 클러스터 진단 CLI. 여러 API 응답을 교차 분석해 근본
 ```bash
 ./gradlew test          # 테스트 (Spring 컨텍스트 없이 도는 순수 단위 테스트가 대부분)
 ./gradlew build         # 빌드 + 테스트
-./gradlew bootJar       # 배포물: 단일 실행 uber-jar
+./gradlew bootJar       # 배포물: 단일 실행 Spring Boot fat jar
 ```
 
 Java 25 toolchain, Spring Boot 4.1, picocli, Jackson 3(`tools.jackson`), Lombok.
