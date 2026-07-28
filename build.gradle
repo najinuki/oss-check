@@ -22,6 +22,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter'
     implementation 'tools.jackson.core:jackson-databind'
     implementation 'info.picocli:picocli:4.7.7'
+    // tar is not in the JDK (gzip is). The dump must be openable with a plain
+    // `tar -xzf`, so the format is not worth hand-rolling.
+    implementation 'org.apache.commons:commons-compress:1.28.0'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
