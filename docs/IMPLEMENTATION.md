@@ -202,6 +202,7 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 14 | 모르는 `CollectTarget`/`Status`는 드롭·`UNKNOWN` 흡수 (`EnumFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL`) | 신버전 덤프를 구버전 도구로 여는 전방 호환. 결정 6(시끄럽게 실패)의 예외인데, 이건 **덤프 파손이 아니라 어휘 차이**라 진단 자체는 문제없이 진행된다 |
 | 15 | `dumpSchemaVersion`만 `Integer`(boxed) | Jackson 3는 `FAIL_ON_NULL_FOR_PRIMITIVES`가 기본 활성이라 필드 없는 구버전 덤프에서 `int` 매핑이 깨진다. 전역으로 끄면 다른 곳(예: health 카운트류)의 loud-fail까지 약해지므로 해당 필드만 boxed로 두고 compact 생성자에서 1로 정규화 |
 | 16 | 룰 구현체는 `rule.catalog` 패키지로 분리 (**아직 미생성**) | 룰은 3개에서 20개 이상으로 늘어난다(AUTOOPS는 59종). 프레임워크 타입(`DiagnosticRule`/`RuleEngine`/`Finding`…)과 구현체가 한 디렉토리에 섞이면 그때는 탐색이 불가능해진다. 이름을 `rules`로 하면 `rule.rules`로 겹치고 `impl`은 의미가 없어 `catalog`를 골랐다(AUTOOPS 벤치마크 문서도 룰 모음을 "체크 카탈로그"라 부른다). **지금 만들면 빈 패키지이므로 OSC-001 작성 시점에 만든다** |
+| 17 | tar.gz 처리에 Apache Commons Compress 채택 | JDK에는 gzip(`java.util.zip`)만 있고 tar가 없다. 덤프는 도구 없이 `tar -xzf`로 열어볼 수 있어야 하는 물건이라(폐쇄망에서 반출된 덤프를 도구 없는 호스트에서 확인하는 경우), USTAR 헤더 체크섬·패딩·긴 파일명을 직접 구현해 미묘하게 어긋나는 위험을 감수할 이유가 없다. **비용은 전이 의존성 포함 4개·약 2.7MB** (commons-compress 1091KB / commons-lang3 697KB / commons-io 551KB / commons-codec 393KB). 배포 jar 14.3MB 중 19%이며, 가장 큰 덩어리는 Spring Boot 계열 8.4MB(59%)다. 직접 구현하면 약 150줄로 이 2.7MB를 줄일 수 있으나 포맷 정합성 리스크와 맞바꾸는 선택이 된다 |
 
 ## 7. 다음 단계
 
