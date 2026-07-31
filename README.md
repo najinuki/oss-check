@@ -172,4 +172,4 @@ directory input for `diagnose` (the input format is a single `tar.gz`).
 
 ## License
 
-Apache License 2.0.
+Apache License 2.0 — see [LICENSE](LICENSE).

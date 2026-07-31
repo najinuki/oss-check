@@ -1,4 +1,4 @@
-# os-check — Implementation Notes
+# oss-check — Implementation Notes
 
 > 이 문서는 [DESIGN.md](DESIGN.md)의 설계 결정을 코드로 옮기면서 확정한 구현 구조와
 > 진행 중 내린 세부 결정의 기록이다. 설계 자체의 변경은 DESIGN.md에서만 다룬다.
