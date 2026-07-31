@@ -5,6 +5,7 @@ import com.nj.oss.check.collect.TarGzDumpSource;
 import com.nj.oss.check.rule.DiagnosticReport;
 import com.nj.oss.check.rule.DiagnosticRule;
 import com.nj.oss.check.rule.RuleEngine;
+import com.nj.oss.check.rule.catalog.RuleCatalog;
 import com.nj.oss.check.snapshot.ClusterSnapshot;
 import com.nj.oss.check.snapshot.SnapshotMetadata;
 import com.nj.oss.check.snapshot.parse.ClusterSnapshotParser;
@@ -44,8 +45,8 @@ public class DiagnoseCommand implements Callable<Integer> {
     @Spec
     CommandSpec spec;
 
-    /** Empty until the rule catalog exists (DESIGN.md 5). */
-    List<DiagnosticRule> rules = List.of();
+    /** Replaced in tests to drive one rule at a time. */
+    List<DiagnosticRule> rules = RuleCatalog.all();
 
     @Override
     public Integer call() throws Exception {

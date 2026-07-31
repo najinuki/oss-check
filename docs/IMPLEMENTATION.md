@@ -3,8 +3,8 @@
 > 이 문서는 [DESIGN.md](DESIGN.md)의 설계 결정을 코드로 옮기면서 확정한 구현 구조와
 > 진행 중 내린 세부 결정의 기록이다. 설계 자체의 변경은 DESIGN.md에서만 다룬다.
 >
-> 마지막 갱신: 2026-07-31 (DESIGN.md 9절 기준 4단계 진행 중 — 수집 계층과 CLI 계층 구현
-> 완료, 룰 0개 상태. `diagnose` live 모드는 아직 없다)
+> 마지막 갱신: 2026-07-31 (DESIGN.md 9절 기준 4단계 진행 중 — 수집 계층·CLI 계층·룰 3개
+> 구현 완료. `diagnose` live 모드는 아직 없다)
 
 ## 1. 패키지 구조
 
@@ -15,7 +15,7 @@ com.nj.oss.check
 ├── snapshot/                    # ClusterSnapshot 모델 (record·enum, 순수 Java)
 │   └── parse/                   # wire format을 아는 유일한 곳 (파서·예외)
 ├── rule/                        # 룰 엔진 + 룰 공통 타입 (순수 Java)
-│   └── catalog/                 # 룰 구현체 (OSC-001 작성 시 생성, 결정 16)
+│   └── catalog/                 # 룰 구현체 3개 + RuleCatalog (결정 16)
 └── collect/                     # 수집 계층 경계 + HTTP 수집기·tar.gz 리더/라이터
 ```
 
@@ -138,6 +138,32 @@ DESIGN.md 4.2의 인터페이스를 그대로 구현:
   **종료 코드는 `findings`만으로 정한다** (SKIPPED는 실행 오류가 아님, DESIGN.md 3.2).
 - `RuleEngine` — 모든 룰 실행 후 finding은 심각도순(동률이면 ruleId순), skipped는 ruleId순 정렬.
 
+### 3.1 `rule.catalog` — 룰 구현체
+
+`RuleCatalog.all()`이 이 빌드가 싣는 룰 전부다. 룰 추가 = 여기 한 줄 추가이며,
+스캐닝·레지스트리·설정 파일은 없다(DESIGN.md 4.1). **카탈로그를 CLI가 아니라 룰 옆에 둔 이유**는
+`rule` 패키지가 Spring 비의존이어야 하기 때문이다 — `@Component` 스캐닝을 쓰면 룰이
+Spring을 알게 된다. CLI는 목록을 받아쓰기만 한다.
+
+| 룰 | 클래스 | 발화 조건 | 없으면 SKIPPED |
+|---|---|---|---|
+| OSC-001 | `CircuitBreakerTrippingRule` | parent breaker `tripped > 0` **그리고** 같은 노드 heap ≥ 85% | 없음 (REQUIRED만 씀) |
+| OSC-002 | `ShardLimitRule` | `max_shards_per_node × 데이터노드 수` 대비 샤드 수가 한도 도달(CRITICAL) 또는 90% 이상(WARNING) | `cluster_settings`, `cat_shards` |
+| OSC-003 | `AllocationDisabledRule` | `cluster.routing.allocation.enable`의 **명시 설정값**이 `none` | `cluster_settings` |
+
+각 룰에서 판단이 필요했던 지점:
+
+- **OSC-001은 두 조건을 모두 요구한다.** `tripped`는 노드 기동 이후 누적이라 단독으로는 몇 달 전
+  장애를 보고할 수 있고, heap 사용률 단독은 JVM이 정상 동작하는 모습이다. 둘이 겹쳐야
+  "트립을 유발한 압박이 아직 유지된다"가 성립한다. finding 문구도 딱 거기까지만 말한다 —
+  누적 카운터로 "지금 요청을 거절 중"이라고 단정할 수는 없다.
+- **OSC-001은 SKIPPED되지 않는다**(결정 27). `top_queries-*` 보강이 빠질 뿐이고,
+  `cat_indices`가 덤프에 없으면 evidence에 "확인하지 못했다"고 남긴다.
+- **OSC-003은 `explicit()`로 읽는다.** 기본값이 `all`이므로 `none`은 항상 사람이 한 일이다(결정 4).
+  발화 여부는 **실효값**으로 정하고(transient `all`이 persistent `none`을 덮으면 발화하지 않는다),
+  조치안은 **값이 실제로 있는 scope**를 지운다(결정 28).
+- **OSC-002는 설정값이 숫자가 아니면 SKIPPED**로 노출한다. 조용히 넘어가면 "정상"과 구별되지 않는다.
+
 ## 4. `collect` 패키지 — 수집 계층 경계
 
 - `CollectTarget` enum — 수집할 15개 엔드포인트 경로·**아카이브 내 파일명**·**필수/선택 등급**을
@@ -240,6 +266,13 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
   **SKIPPED가 종료 코드를 바꾸지 않는지**, JSON 필드, 없는 덤프(exit 2),
   **REQUIRED 빠진 덤프가 조용히 "No findings"를 내지 않고 exit 2로 실패하는지**.
 - `PasswordSourceTest` (3개) — 환경변수 경로, TTY도 변수도 없을 때 묻지 않고 실패, 빈 변수 허용.
+- **룰 테스트 (22개)** — 룰마다 양성·음성·경계 3종(DESIGN.md 6절). 경계 테스트는 매직 넘버가
+  아니라 룰의 상수(`HEAP_PRESSURE_PERCENT`, `WARNING_RATIO`)를 참조한다.
+  음성 테스트는 전부 정상 픽스처 그대로를 넣는다 — 오탐 방어선이다.
+- `ClusterSnapshotBuilder` (testsupport) — 정상 픽스처를 파싱한 뒤 **한 가지만 바꾼** 스냅샷을
+  만든다. 룰마다 덤프 디렉토리를 새로 쓰면 바뀐 한 필드가 수백 줄 JSON에 묻히고, 무엇보다
+  모든 룰 테스트가 "그 외에는 건강한 클러스터"에서 돌아야 엉뚱한 이유로 발화하는 룰이
+  숨을 곳이 없다.
 - `HttpDumpSourceTest` (12개) — **실제 `HttpServer`를 띄워** 검증한다(HTTP 클라이언트를
   목으로 대체하면 정작 검증하고 싶은 것이 사라진다). 픽스처는 파서 테스트와 같은
   `fixtures/normal/`을 응답 본문으로 재사용한다.
@@ -283,6 +316,8 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 24 | 명령에서 새어나온 예외를 종료 코드 **2**로 매핑 (`ExecutionErrorHandler`) | picocli의 기본 실행 예외 종료 코드는 1인데 이 도구에서 1은 **"finding 발견"**이다(DESIGN.md 3.2). 그대로 두면 접속 불가·덤프 파손 같은 실행 실패를 스크립트가 **진단 결과로 오인**한다. Spring 기동 실패도 같은 이유로 `main`에서 잡는다. 운영자에게는 스택 트레이스가 아니라 한 줄 메시지를 준다 |
 | 25 | 덤프 덮어쓰기 금지를 **두 겹**으로 (CLI 사전 검사 + `CREATE_NEW`) | 사전 검사만으로는 수집이 도는 수십 초 동안 같은 경로에 파일이 생기면 그대로 덮어쓴다(TOCTOU). 실제 보장은 `TarGzDumpWriter`가 `StandardOpenOption.CREATE_NEW`로 파일을 만들며 원자적으로 거부하는 것이고, CLI의 사전 검사는 **60초 수집 후에 실패를 알리지 않기 위한 예의**다. 보장을 라이터에 두면 앞으로 어떤 호출자도 덤프를 실수로 날릴 수 없다. 대신 `CREATE_NEW`는 부작용을 하나 만든다 — 쓰다 실패하면(디스크 부족 등) 반쪽 파일이 남아 **재시도까지 막는다**. 그래서 쓰기 실패 시 이 호출이 만든 파일을 지운다. 임시 파일+rename은 이름 선점 시점이 뒤로 밀려 동시 실행 방어가 약해지므로 택하지 않았다. JVM이 쓰는 도중 죽으면 반쪽 파일이 남는 것은 이 선택의 잔여 비용이다 |
 | 26 | 룰이 0개면 diagnose가 stderr로 경고한다 | 카탈로그가 비어 있는 빌드는 **무조건 "No findings"**를 낸다. 이건 구조적 미탐이라, 빈 리포트가 건강한 클러스터로 읽히지 않게 소리를 낸다. 룰이 생기면 조건이 저절로 거짓이 되어 사라진다. 덤프 스키마 버전 경고(결정 13)도 같은 자리에서 낸다 — 둘 다 "이 리포트는 보이는 것보다 좁다"는 뜻이기 때문 |
+| 27 | OSC-001은 `cat_indices`가 없어도 SKIPPED되지 않는다 (DESIGN.md 5 표 정정) | 발화 조건(브레이커 트립 + heap)이 REQUIRED 타깃인 `_nodes/stats`만으로 판정된다. `cat_indices`는 `top_queries-*` 방치 패턴을 덧붙이는 보강용일 뿐인데, 그것 때문에 서킷 브레이커 트립을 판정하지 않는 것은 손해가 더 크다 — 무관한 엔드포인트의 403이 진짜 장애를 가린다. 대신 evidence에 "확인하지 못했다"를 남긴다: 인덱스가 **없는 것**과 **못 본 것**은 다른 사실이다(결정 10과 같은 결) |
+| 28 | OSC-003의 조치안은 값이 실제로 있는 **scope**를 지운다 | 롤링 재시작 중에는 `transient`로 거는 것이 흔하고 transient가 persistent를 이긴다. 조치안이 persistent만 지우면 운영자가 그대로 실행해도 **allocation은 계속 꺼져 있고 본인은 켰다고 믿는다** — 동작하지 않는 조치안은 근거 없는 finding만큼 해롭다. 두 scope에 모두 `none`이면 둘 다 지운다(transient만 지우면 persistent가 살아난다). 발화 여부는 실효값으로 정하므로 transient `all`이 persistent `none`을 덮는 클러스터에서는 발화하지 않는다 |
 
 ## 8. 다음 단계
 
@@ -307,10 +342,12 @@ CLI 계층(5절)도 구현됐다. core가 의도적으로 미뤄뒀던 것들이
 전부 CLI의 일**이다 — `ClusterConnection`이 환경을 알게 되면 core의 환경 비의존이 깨진다.
 core가 지는 책임은 "사용자명과 비밀번호는 함께 있거나 함께 없다"는 불변식뿐이다(결정 22).
 
-**다음은 룰 3개**다 — `rule.catalog` 패키지 생성(결정 16), OSC-001/002/003,
-룰별 3종 픽스처(양성·음성·경계)와 `ClusterSnapshotBuilder` 헬퍼(DESIGN.md 6절).
-그 다음이 `diagnose --endpoint` live 모드로, `DumpSource` 구현체 교체와
-접속 옵션 재사용이 전부다.
+룰 3개(3.1절)도 구현됐다. `rule.catalog` 패키지, OSC-001/002/003, 룰별 3종 테스트와
+`ClusterSnapshotBuilder` 헬퍼까지 DESIGN.md 5·6절대로다.
+
+**다음은 `diagnose --endpoint` live 모드**다 — `DumpSource` 구현체를 `HttpDumpSource`로
+바꾸고 collect의 접속 옵션(비밀번호 처리 포함)을 재사용하는 것이 전부다.
+그 뒤에 남는 것은 README(영문 필수, DESIGN.md 1)와 릴리스 버전 정리다.
 
 ### 남은 숙제
 

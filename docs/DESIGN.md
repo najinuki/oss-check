@@ -273,13 +273,17 @@ SKIPPED (2 rules could not be evaluated)
 
 | 룰 | 필요한 OPTIONAL 타깃 |
 |---|---|
-| OSC-001 | `cat_indices` (`top_queries-*` 존재/크기 확인용) |
+| OSC-001 | **없음.** `cat_indices`는 있으면 근거 보강, 없어도 발화 (아래) |
 | OSC-002 | `cluster_settings`, `cat_shards` |
 | OSC-003 | `cluster_settings` (+ `allocation_explain`은 있으면 근거 보강, 없어도 발화 가능) |
 
-> OSC-001의 `top_queries-*` 부분은 Query Insights 플러그인의 로컬 인덱스 익스포터가 켜진
-> 클러스터에서만 성립한다. 해당 인덱스가 없으면 브레이커 트립 + heap 근거만으로 발화하고,
-> 쿼리 인사이트 방치 패턴은 언급하지 않는다 (룰 자체를 SKIPPED하지는 않는다).
+> **OSC-001은 SKIPPED되지 않는다.** 발화 조건(브레이커 트립 + heap 압박)이 REQUIRED 타깃인
+> `_nodes/stats`만으로 판정되기 때문이다. `cat_indices`는 `top_queries-*` 인덱스 방치 패턴을
+> 덧붙이는 **근거 보강용**이고, 이건 Query Insights 플러그인의 로컬 인덱스 익스포터가 켜진
+> 클러스터에서만 성립한다. 따라서 두 경우 모두 발화하되 보강 근거만 빠진다:
+> 인덱스가 존재하지 않는 경우, 그리고 `cat_indices.json` 자체가 덤프에 없는 경우.
+> 후자는 evidence에 "확인하지 못했다"고 명시한다 — 없는 것과 못 본 것은 다른 사실이다.
+> 무관한 엔드포인트의 403 때문에 서킷 브레이커 트립을 판정하지 않는 것은 손해가 더 크다.
 > 플러그인 도입 최소 버전은 룰 구현 시점에 실제 클러스터로 확인해 확정한다.
 
 ## 6. 테스트 전략
@@ -349,9 +353,11 @@ OPTIONAL 타깃이 빠진 덤프를 별도로 둔다. 검증 대상은 두 가�
 4. collect 구현 (HTTP 수집기 + tar.gz 생성) → diagnose offline 모드 → 룰 3개 → live 모드
     - ~~tar.gz 쓰기/읽기~~ ✅ 완료 — `TarGzDumpWriter` / `TarGzDumpSource`
     - ~~HTTP 라이브 수집기~~ ✅ 완료 — `HttpDumpSource` / `ClusterConnection`
-    - CLI 와이어링 (picocli `collect`·`diagnose` 명령, 종료 코드, 스키마 버전 경고 출력,
-      비밀번호 프롬프트/환경변수 처리 — 3.1) ← **여기부터**
-    - diagnose offline 모드 → 룰 3개 → live 모드
+    - ~~CLI 와이어링~~ ✅ 완료 — picocli `collect`·`diagnose`, 종료 코드,
+      스키마 버전 경고, 비밀번호 프롬프트/환경변수(3.1)
+    - ~~diagnose offline 모드~~ ✅ 완료 — `--input`, 텍스트·JSON 리포트
+    - ~~룰 3개~~ ✅ 완료 — OSC-001/002/003, `rule.catalog`
+    - `diagnose --endpoint` live 모드 ← **여기부터**
 
 3번을 4번보다 먼저 한 이유: 룰 3개를 만든 뒤에 `RuleResult`로 바꾸면 룰과 룰 테스트를
 전부 다시 손봐야 한다. 룰 시그니처가 굳지 않은 시점이 비용이 가장 낮았다.
