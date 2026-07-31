@@ -3,18 +3,19 @@
 > 이 문서는 [DESIGN.md](DESIGN.md)의 설계 결정을 코드로 옮기면서 확정한 구현 구조와
 > 진행 중 내린 세부 결정의 기록이다. 설계 자체의 변경은 DESIGN.md에서만 다룬다.
 >
-> 마지막 갱신: 2026-07-27 (DESIGN.md 9절 기준 1·2·3단계 완료 시점)
+> 마지막 갱신: 2026-07-30 (DESIGN.md 9절 기준 4단계 진행 중 — 수집 계층 구현 완료,
+> CLI 와이어링 이전 시점)
 
 ## 1. 패키지 구조
 
 ```
 com.nj.oss.check
-├── OssCheckApplication          # Spring Boot 진입점 (CLI 와이어링은 4단계에서)
+├── OssCheckApplication          # Spring Boot 진입점 (CLI 와이어링은 아직)
 ├── snapshot/                    # ClusterSnapshot 모델 (record·enum, 순수 Java)
 │   └── parse/                   # wire format을 아는 유일한 곳 (파서·예외)
 ├── rule/                        # 룰 엔진 + 룰 공통 타입 (순수 Java)
 │   └── catalog/                 # 룰 구현체 (OSC-001 작성 시 생성, 결정 16)
-└── collect/                     # 수집 계층 경계 (HTTP 수집기·tar.gz 리더는 4단계에서)
+└── collect/                     # 수집 계층 경계 + HTTP 수집기·tar.gz 리더/라이터
 ```
 
 **core 패키지(snapshot/rule/collect)는 Spring 비의존.** 순수 Java로 유지해 테스트를
@@ -148,8 +149,19 @@ DESIGN.md 4.2의 인터페이스를 그대로 구현:
   `describeFailure()`가 `"HTTP 403: no permissions for [...]"` 형태 문자열을 만든다.
 - `RawDump` — 파싱 전 원본 JSON 묶음 (metadata + 타깃별 payload 맵).
   **collect 계층과 snapshot 파서 사이의 경계 타입**으로, live/offline 두 모드가 여기서 수렴한다.
-- `DumpSource` — `RawDump`를 만들어내는 인터페이스. 구현체 2개(HTTP live 수집,
-  tar.gz 아카이브 리더)는 4단계에서 작성한다.
+- `DumpSource` — `RawDump`를 만들어내는 인터페이스. 구현체는 2개다.
+    - `HttpDumpSource` — live 수집. `CollectTarget`을 전부 순회하며 HTTP GET 하고
+      타깃별 결과를 `CollectionOutcome`으로 기록한다. **REQUIRED 실패만 `IOException`으로
+      중단**하고 OPTIONAL 실패는 리포트에 남긴 채 계속한다(DESIGN.md 3.1).
+      클러스터 이름/버전은 루트 엔드포인트에서 얻는데, 이건 `CollectTarget`이 아니라
+      덤프를 식별하는 정보라 실패해도 치명적이지 않다(이름 없는 덤프도 진단은 된다).
+    - `TarGzDumpSource` — offline 리더. 아카이브 엔트리를 **경로가 아닌 파일명**으로
+      `CollectTarget`에 매칭하므로 디렉토리로 묶인 덤프도 평평한 덤프와 똑같이 읽힌다.
+      모르는 엔트리는 무시한다(신버전 덤프 전방 호환).
+- `TarGzDumpWriter` — `RawDump` → tar.gz. 엔트리를 맵이 아닌 **enum 선언 순서**로 쓰고,
+  `tar -xzf`만으로 열리는 아카이브를 만든다(도구 없는 호스트에서 응답을 확인하는 경우).
+- `ClusterConnection` — 접속 정보(endpoint / user / password / insecure) record.
+  생성 시점에 endpoint의 scheme·userinfo(결정 19)와 자격증명 짝 불변식(결정 22)을 검증한다.
 
 ### 덤프 호환 정책이 코드에서 강제되는 지점
 
@@ -179,6 +191,19 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
       스키마 버전 필드가 없는 구버전 덤프는 1로 간주
 - `RuleEngineTest` (4개) — 심각도·ruleId 정렬, SKIPPED와 NotFired 구분, 둘 혼재 시 수집.
 - `SizeParserTest` (4개) — 숫자/사람용 단위/null/불량 입력.
+- `TarGzDumpRoundTripTest` — 쓰기→읽기 왕복, 파일명 매칭, 모르는 엔트리 무시.
+- `ClusterConnectionTest` (7개) — 자격증명 짝 불변식(결정 22), 빈 비밀번호 허용,
+  endpoint의 userinfo 거부 시 **예외 메시지에 비밀번호가 없는지**, scheme 제한(결정 19).
+- `HttpDumpSourceTest` (12개) — **실제 `HttpServer`를 띄워** 검증한다(HTTP 클라이언트를
+  목으로 대체하면 정작 검증하고 싶은 것이 사라진다). 픽스처는 파서 테스트와 같은
+  `fixtures/normal/`을 응답 본문으로 재사용한다.
+    - 전 타깃 수집 + 선언된 경로로 요청, Basic 인증 헤더 유무
+    - OPTIONAL 실패(403) 시 수집 계속 + `absenceReason`까지 이어지는지,
+      `allocation/explain`의 400이 치명적이지 않은지, REQUIRED 실패(500) 시 중단
+    - 루트 엔드포인트가 막혀도 진단 가능한 덤프가 나오는지, 에러 바디 절단
+    - **인터럽트 시 부분 덤프 대신 중단**(결정 18) — OPTIONAL 타깃 응답을 서버에서
+      멈춰 세우고 수집 스레드를 인터럽트한다
+    - **리다이렉트를 따라가지 않음**(결정 20) — 302를 실패로 기록하는지 확인
 
 룰별 3종 픽스처(양성/음성/경계)와 `ClusterSnapshotBuilder` 헬퍼는 룰 구현과 함께 작성한다.
 
@@ -203,13 +228,19 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 15 | `dumpSchemaVersion`만 `Integer`(boxed) | Jackson 3는 `FAIL_ON_NULL_FOR_PRIMITIVES`가 기본 활성이라 필드 없는 구버전 덤프에서 `int` 매핑이 깨진다. 전역으로 끄면 다른 곳(예: health 카운트류)의 loud-fail까지 약해지므로 해당 필드만 boxed로 두고 compact 생성자에서 1로 정규화 |
 | 16 | 룰 구현체는 `rule.catalog` 패키지로 분리 (**아직 미생성**) | 룰은 3개에서 20개 이상으로 늘어난다(AUTOOPS는 59종). 프레임워크 타입(`DiagnosticRule`/`RuleEngine`/`Finding`…)과 구현체가 한 디렉토리에 섞이면 그때는 탐색이 불가능해진다. 이름을 `rules`로 하면 `rule.rules`로 겹치고 `impl`은 의미가 없어 `catalog`를 골랐다(AUTOOPS 벤치마크 문서도 룰 모음을 "체크 카탈로그"라 부른다). **지금 만들면 빈 패키지이므로 OSC-001 작성 시점에 만든다** |
 | 17 | tar.gz 처리에 Apache Commons Compress 채택 | JDK에는 gzip(`java.util.zip`)만 있고 tar가 없다. 덤프는 도구 없이 `tar -xzf`로 열어볼 수 있어야 하는 물건이라(폐쇄망에서 반출된 덤프를 도구 없는 호스트에서 확인하는 경우), USTAR 헤더 체크섬·패딩·긴 파일명을 직접 구현해 미묘하게 어긋나는 위험을 감수할 이유가 없다. **비용은 전이 의존성 포함 4개·약 2.7MB** (commons-compress 1091KB / commons-lang3 697KB / commons-io 551KB / commons-codec 393KB). 배포 jar 14.3MB 중 19%이며, 가장 큰 덩어리는 Spring Boot 계열 8.4MB(59%)다. 직접 구현하면 약 150줄로 이 2.7MB를 줄일 수 있으나 포맷 정합성 리스크와 맞바꾸는 선택이 된다 |
+| 18 | HTTP 수집 중 `InterruptedException`은 타깃 실패로 기록하지 않고 `InterruptedIOException`으로 즉시 중단 | 인터럽트를 다른 수집 실패와 똑같이 기록하고 계속 돌면, 남은 타깃이 전부 OPTIONAL일 때 **취소된 실행이 "부분 수집 성공"으로 둔갑**한다 — 사용자가 Ctrl-C로 끊은 덤프가 진단 가능한 덤프처럼 보이는 미탐이고, 결정 6·10과 같은 계열이다. interrupt flag를 복원하고 원인을 cause로 보존해 던지므로 취소했다는 사실이 호출자에게 남는다. `InterruptedIOException`은 `IOException`이라 `DumpSource.load()` 계약과 종료 코드 2 경로는 그대로다 |
+| 19 | `ClusterConnection`이 endpoint의 scheme(http/https)과 userinfo 부재를 생성 시점에 검증 | REQUIRED 수집 실패 메시지가 endpoint 문자열을 그대로 담기 때문에, `https://user:pw@host` 형태를 허용하면 **자격증명이 에러 메시지로 새어나간다**. userinfo를 scheme보다 먼저 검사하는 이유도 같다 — scheme 오류 메시지가 URL을 출력한다. query·fragment 등 나머지 URI 구성요소까지 막지는 않았다(발생하지 않을 시나리오의 에러 처리) |
+| 20 | 자동 리다이렉트 비활성화 (`Redirect.NEVER`) | 모든 요청에 Basic 인증 헤더를 직접 붙이므로, 리다이렉트를 따라가면 `Location`이 가리키는 아무 호스트에나 자격증명이 갈 수 있다. OpenSearch API는 리다이렉트하지 않으니 얻을 것이 없는 위험이다. 끄고 나면 JDK가 cross-origin 리다이렉트에서 `Authorization`을 떼는지 여부도 따질 필요가 없어진다 |
+| 21 | `--insecure`의 범위를 **인증서 신뢰**로 한정 (호스트명 검증은 유지) | JDK `HttpClient`는 넘겨받은 `SSLParameters`와 무관하게 HTTPS endpoint identification을 다시 켠다. 즉 `setEndpointIdentificationAlgorithm(null)`은 효과가 없었고, 호스트명 검증을 실제로 끄는 방법은 JVM 전역 시스템 속성(`jdk.internal.httpclient.disableHostnameVerification`)뿐인데 이는 프로세스 전체에 영향을 준다. 동작하지 않는 코드와 "이게 동작한다"고 주장하는 주석을 남기는 대신 **계약을 실제 동작에 맞췄다** — DESIGN.md 3.1의 "자체 서명 인증서 허용"과도 이미 일치한다. IP로 접속하려면 그 IP를 포함한 인증서가 필요하다는 제약은 `ClusterConnection` Javadoc에 명시 |
+| 22 | `username`/`password` 짝 불변식을 `ClusterConnection` 생성자에서 강제 (빈 사용자명도 거부) | DESIGN.md 3.1이 `--password` 옵션을 없애고 프롬프트/환경변수로 바꾸면서 "함께 있거나 함께 없다"를 확정했다. 한쪽만 있으면 `hasCredentials()`가 `false`가 되어 **사용자는 인증했다고 믿는데 익명 요청이 나가고**, 돌아온 401/403이 수집 리포트에 "이 계정에 권한 없음"으로 박힌다 — 설정 실수가 클러스터 권한 문제로 위장되고, 덤프를 몇 달 뒤 여는 사람은 그 위장을 풀 수 없다. 불변식이 생기면서 `hasCredentials()`는 `username != null`로 단순해졌다. **빈 문자열 비밀번호는 허용**한다: 일부러 준 빈 값과 아예 안 온 것(`null`)은 다른 사실이라는 결정 10과 같은 결이다. 환경변수·프롬프트·TTY 판정은 전부 CLI 몫이고 core는 이 불변식만 진다 |
 
 ## 7. 다음 단계
 
 DESIGN.md 9절 4단계 — **collect 구현(HTTP 수집기 + tar.gz 생성) → diagnose offline 모드
 → 룰 3개 → live 모드** 순서. 이 문서는 각 단계 완료 시 갱신한다.
 
-collect 구현 시 반드시 함께 해야 하는 것:
+수집 계층(`HttpDumpSource` / `TarGzDumpSource` / `TarGzDumpWriter`)은 구현됐다.
+위 항목들은 코드와 테스트로 지켜지고 있다:
 
 - 타깃별 성공/실패를 `CollectionOutcome`으로 기록해 `metadata.json`에 쓴다.
   **실패한 타깃의 파일은 아카이브에 넣지 않는다** — 에러 바디를 payload로 저장하면
@@ -217,3 +248,21 @@ collect 구현 시 반드시 함께 해야 하는 것:
 - OPTIONAL 타깃 수집 실패는 collect를 중단시키지 않는다. REQUIRED 실패만 중단 사유다.
 - `allocation/explain`의 HTTP 400은 실패로 기록하되(결정 2의 "설명할 것 없음"),
   이는 정상 클러스터의 기대 동작이므로 collect 종료 코드에 영향을 주지 않는다.
+
+**다음은 CLI 계층 와이어링**이다 — picocli `collect` / `diagnose` 명령을 Spring 진입점에
+붙이고, 지금까지 core에서 의도적으로 미뤄둔 것들을 여기서 처리한다:
+덤프 스키마 버전 경고 출력(결정 13), 종료 코드 결정(DESIGN.md 3.2),
+그리고 **비밀번호 프롬프트/환경변수 처리**(DESIGN.md 3.1).
+
+비밀번호 처리는 계층이 갈린다. **환경변수를 읽고 프롬프트를 띄우고 TTY를 판정하는 것은
+전부 CLI의 일**이다 — `ClusterConnection`이 환경을 알게 되면 core의 환경 비의존이 깨진다.
+core가 지는 책임은 "사용자명과 비밀번호는 함께 있거나 함께 없다"는 불변식뿐이다(아래).
+
+### 수집 계층에 남은 숙제
+
+- **루트 엔드포인트의 2xx 파손 응답** (아직 결정 전): 지금은 이름·버전을 null로 두고
+  넘어가는데, 루트는 `CollectTarget`이 아니라 `CollectionOutcome`에도 사유가 남지 않는다.
+  기록하려면 `metadata.json` 스키마 변경이므로 DESIGN.md 3.1 선행.
+- **`CollectTarget.path()`의 query 파라미터가 테스트로 검증되지 않는다.** 테스트 서버가
+  경로만 기록하므로 `bytes=b`(결정 1)·`include_defaults=true`·`format=json`이 누락돼도
+  테스트가 통과한다.
