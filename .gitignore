@@ -38,3 +38,11 @@ out/
 
 ### Claude Code ###
 .claude/
+
+### Collected dumps — real cluster data, never committed ###
+# A dump carries index names, template field names, node names and capacity.
+# README says to review one before it leaves a controlled environment; this is
+# what stops it leaving by accident.
+result/
+# collect writes here by default when run from the repository root
+oss-check-*.tar.gz
