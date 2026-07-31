@@ -51,7 +51,13 @@ class HttpDumpSourceTest {
     private final Map<String, Integer> statuses = new HashMap<>();
     /** Paths answered with a 302 to the mapped location. */
     private final Map<String, String> redirects = new HashMap<>();
-    private final List<String> requestedPaths = new ArrayList<>();
+    /**
+     * What was actually asked for, query string included. The query is where
+     * {@code bytes=b} and {@code include_defaults=true} live, and those are
+     * parsing contracts — dropping them here would let the test pass while the
+     * collector asked for something the parser cannot read.
+     */
+    private final List<String> requestedUris = new ArrayList<>();
     private final List<String> authorizationHeaders = new ArrayList<>();
 
     @BeforeEach
@@ -83,7 +89,7 @@ class HttpDumpSourceTest {
         RawDump dump = source().load();
 
         assertThat(dump.payloads()).hasSize(CollectTarget.values().length);
-        assertThat(requestedPaths).contains("/", "/_cluster/health", "/_nodes/stats", "/_index_template");
+        assertThat(requestedUris).contains("/", "/_cluster/health", "/_nodes/stats", "/_index_template");
 
         ClusterSnapshot snapshot = new ClusterSnapshotParser().parse(dump);
         assertThat(snapshot.metadata().clusterName()).isEqualTo("prod-search");
@@ -96,12 +102,14 @@ class HttpDumpSourceTest {
     }
 
     @Test
-    void requestsEachTargetAtItsDeclaredPath() throws IOException {
+    void requestsEachTargetAtItsDeclaredPathWithItsQueryIntact() throws IOException {
         source().load();
 
-        // the enum is the single source of truth for what gets called
+        // the enum is the single source of truth for what gets called, down to
+        // the query string: bytes=b is what makes sizes arrive as numbers, and
+        // include_defaults=true is what makes settings diagnosable at all
         for (CollectTarget target : CollectTarget.values()) {
-            assertThat(requestedPaths).contains("/" + pathOf(target));
+            assertThat(requestedUris).contains("/" + target.path());
         }
     }
 
@@ -242,7 +250,7 @@ class HttpDumpSourceTest {
         // the caller who cancelled has to be able to see it was cancelled
         assertThat(interruptFlagRestored).isTrue();
         // and collection stopped there rather than walking the remaining targets
-        assertThat(requestedPaths).doesNotContain("/_index_template");
+        assertThat(requestedUris).doesNotContain("/_index_template");
     }
 
     @Test
@@ -295,7 +303,8 @@ class HttpDumpSourceTest {
 
     private void handle(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        requestedPaths.add(path);
+        String query = exchange.getRequestURI().getRawQuery();
+        requestedUris.add(query == null ? path : path + "?" + query);
         if (path.equals(stalledPath)) {
             stalledRequestArrived.countDown();
             awaitQuietly(releaseStalledRequest);
