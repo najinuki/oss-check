@@ -1,18 +1,17 @@
 package com.nj.oss.check.cli;
 
-import com.nj.oss.check.collect.ClusterConnection;
 import com.nj.oss.check.collect.CollectTarget;
 import com.nj.oss.check.collect.HttpDumpSource;
 import com.nj.oss.check.collect.RawDump;
 import com.nj.oss.check.collect.TarGzDumpWriter;
 import org.springframework.stereotype.Component;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
 import java.io.PrintWriter;
-import java.net.URI;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,19 +36,8 @@ public class CollectCommand implements Callable<Integer> {
     private static final DateTimeFormatter DUMP_TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
 
-    @Option(names = "--endpoint", required = true, paramLabel = "<url>",
-            description = "Cluster base URL, e.g. https://opensearch.internal:9200")
-    URI endpoint;
-
-    @Option(names = "--user", paramLabel = "<name>",
-            description = "Basic-auth user. The password comes from $"
-                    + PasswordSource.ENVIRONMENT_VARIABLE + " or is asked for interactively.")
-    String user;
-
-    @Option(names = "--insecure",
-            description = "Accept a TLS certificate this host does not trust, typically self-signed. "
-                    + "The certificate must still match the endpoint's host name.")
-    boolean insecure;
+    @Mixin
+    ClusterConnectionOptions connection = new ClusterConnectionOptions();
 
     @Option(names = "--output", paramLabel = "<path>",
             description = "Where to write the dump. Defaults to oss-check-<timestamp>.tar.gz "
@@ -58,9 +46,6 @@ public class CollectCommand implements Callable<Integer> {
 
     @Spec
     CommandSpec spec;
-
-    /** Replaced in tests. Not worth a Spring bean: nothing else needs it. */
-    PasswordSource passwordSource = new PasswordSource();
 
     @Override
     public Integer call() throws Exception {
@@ -72,10 +57,7 @@ public class CollectCommand implements Callable<Integer> {
             throw new IllegalStateException(alreadyExists(target));
         }
 
-        String password = user == null ? null : passwordSource.forUser(user);
-        ClusterConnection connection = new ClusterConnection(endpoint, user, password, insecure);
-
-        RawDump dump = new HttpDumpSource(connection, ToolVersion.VERSION).load();
+        RawDump dump = new HttpDumpSource(connection.toConnection(), ToolVersion.VERSION).load();
         try {
             new TarGzDumpWriter().write(dump, target);
         } catch (FileAlreadyExistsException e) {

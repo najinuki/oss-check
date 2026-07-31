@@ -9,6 +9,7 @@ import com.nj.oss.check.rule.Finding;
 import com.nj.oss.check.rule.RuleResult;
 import com.nj.oss.check.rule.Severity;
 import com.nj.oss.check.snapshot.ClusterSnapshot;
+import com.nj.oss.check.testsupport.FakeCluster;
 import com.nj.oss.check.testsupport.Fixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -112,6 +113,56 @@ class DiagnoseCommandTest {
     }
 
     @Test
+    void diagnosesALiveClusterWithoutWritingADump() {
+        try (FakeCluster cluster = FakeCluster.serving("normal")) {
+            int exitCode = executeRaw(new DiagnoseCommand(), "--endpoint", cluster.endpoint());
+
+            assertThat(exitCode).isEqualTo(ExitCode.NO_FINDINGS);
+            assertThat(out.toString()).contains("fixture-cluster", "No findings.");
+            // live mode diagnoses in memory; only the fixture dump written by
+            // the setup is on disk
+            assertThat(workDir.toFile().list()).containsExactly("dump.tar.gz");
+        }
+    }
+
+    @Test
+    void aLiveClusterCarriesTheSameRulesAsADump() {
+        // the point of one pipeline behind two DumpSources: an offline dump is
+        // a faithful rehearsal of what live mode would have said
+        try (FakeCluster cluster = FakeCluster.serving("normal")
+                .answering(CollectTarget.CLUSTER_SETTINGS, """
+                        {
+                          "persistent": { "cluster": { "routing": { "allocation": { "enable": "none" } } } },
+                          "transient": {},
+                          "defaults": { "cluster": { "max_shards_per_node": "1000" } }
+                        }
+                        """)) {
+            int exitCode = executeRaw(new DiagnoseCommand(), "--endpoint", cluster.endpoint());
+
+            assertThat(exitCode).isEqualTo(ExitCode.FINDINGS);
+            assertThat(out.toString()).contains("OSC-003", "allocation is disabled");
+        }
+    }
+
+    @Test
+    void refusesToReadADumpAndACusterAtOnce() {
+        int exitCode = executeRaw(new DiagnoseCommand(),
+                "--input", dump.toString(), "--endpoint", "http://localhost:9200");
+
+        assertThat(exitCode).isEqualTo(ExitCode.ERROR);
+        assertThat(err.toString()).contains("mutually exclusive");
+    }
+
+    @Test
+    void refusesToRunWithoutASource() {
+        // defaulting to either one would hide which cluster the report is about
+        int exitCode = executeRaw(new DiagnoseCommand());
+
+        assertThat(exitCode).isEqualTo(ExitCode.ERROR);
+        assertThat(err.toString()).contains("--input", "--endpoint");
+    }
+
+    @Test
     void aMissingDumpIsAnExecutionError() {
         int exitCode = execute(command(), "--input", workDir.resolve("absent.tar.gz").toString());
 
@@ -165,21 +216,23 @@ class DiagnoseCommandTest {
         };
     }
 
+    /** Runs against the fixture dump unless the arguments name a source themselves. */
     private int execute(DiagnoseCommand command, String... args) {
-        String[] all = args.length == 0
-                ? new String[]{"--input", dump.toString()}
-                : concat(args);
+        return executeRaw(command, withDefaultSource(args));
+    }
+
+    private int executeRaw(DiagnoseCommand command, String... args) {
         return new CommandLine(command)
                 .setExecutionExceptionHandler(new ExecutionErrorHandler())
                 .setCaseInsensitiveEnumValuesAllowed(true)
                 .setOut(new PrintWriter(out, true))
                 .setErr(new PrintWriter(err, true))
-                .execute(all);
+                .execute(args);
     }
 
-    private String[] concat(String... args) {
-        boolean hasInput = List.of(args).contains("--input");
-        if (hasInput) {
+    private String[] withDefaultSource(String... args) {
+        List<String> given = List.of(args);
+        if (given.contains("--input") || given.contains("--endpoint")) {
             return args;
         }
         String[] all = new String[args.length + 2];

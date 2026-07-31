@@ -3,8 +3,8 @@
 > 이 문서는 [DESIGN.md](DESIGN.md)의 설계 결정을 코드로 옮기면서 확정한 구현 구조와
 > 진행 중 내린 세부 결정의 기록이다. 설계 자체의 변경은 DESIGN.md에서만 다룬다.
 >
-> 마지막 갱신: 2026-07-31 (DESIGN.md 9절 기준 4단계 진행 중 — 수집 계층·CLI 계층·룰 3개
-> 구현 완료. `diagnose` live 모드는 아직 없다)
+> 마지막 갱신: 2026-07-31 (DESIGN.md 9절 **4단계 완료** — 수집 계층·CLI 계층·룰 3개·
+> live 모드까지. 남은 것은 README와 릴리스 버전 정리)
 
 ## 1. 패키지 구조
 
@@ -205,20 +205,30 @@ Spring을 알게 된다. CLI는 목록을 받아쓰기만 한다.
 알지 못하고, 환경변수·TTY·파일시스템 경로·터미널 출력 같은 "바깥 세상"은 전부 여기서 다룬다.
 
 ```
-collect:   옵션 → ClusterConnection → HttpDumpSource → RawDump → TarGzDumpWriter → 파일
-diagnose:  --input → TarGzDumpSource → RawDump → ClusterSnapshotParser → RuleEngine → 리포트
+collect:            옵션 → ClusterConnection → HttpDumpSource ─┐
+diagnose --endpoint 옵션 → ClusterConnection → HttpDumpSource ─┤
+diagnose --input                              TarGzDumpSource ─┴→ RawDump ─┐
+                                                                           │
+collect:   RawDump → TarGzDumpWriter → 파일                                │
+diagnose:  RawDump → ClusterSnapshotParser → RuleEngine → 리포트 ←─────────┘
 ```
+
+**`DumpSource` 하나만 갈아끼우면 live와 offline이 갈린다.** 그 뒤의 파싱·룰·리포트·종료 코드는
+같은 코드이고, 오프라인 덤프가 라이브 실행의 충실한 리허설이 되는 근거가 이것이다(DESIGN.md 4.3).
 
 - `OssCheckCommand` — 최상위 `oss-check`. 자체 옵션 없이 `collect`/`diagnose`만 단다(DESIGN.md 3).
   서브커맨드 없이 실행하면 usage를 내고 **종료 코드 2**로 끝난다 — 조용히 0으로 끝나면
   스크립트가 성공으로 읽는다. 정적 메서드 `commandLine(factory)`가 명령 트리 조립을 한 곳에
   모으므로 **main과 테스트가 같은 배선을 쓴다**(예외 핸들러가 실제로 붙어 있는지를 테스트가 본다).
-- `CollectCommand` — `--endpoint`(필수) / `--user` / `--insecure` / `--output`.
+- `CollectCommand` — 접속 옵션 + `--output`.
   부분 수집이면 빠진 타깃을 이름으로 나열하고 `metadata.json`을 가리킨다.
-- `DiagnoseCommand` — `--input`(필수) / `--format text|json`. **live 모드(`--endpoint`)는 아직 없다**
-  — `DumpSource` 구현체만 갈아끼우면 되므로 룰 이후로 미뤘다(DESIGN.md 9절).
+- `DiagnoseCommand` — `--input` 또는 접속 옵션 중 **정확히 하나**, 그리고 `--format text|json`.
+  둘을 배타 그룹으로 묶어 picocli가 usage 오류로 잡는다(결정 30).
+- `ClusterConnectionOptions` — `--endpoint` / `--user` / `--insecure`와 비밀번호 해석.
+  `collect`는 `@Mixin`으로, `diagnose`는 배타 그룹의 한쪽으로 **같은 클래스**를 쓴다(결정 29).
 - `PasswordSource` — 환경변수 → TTY 프롬프트 → 실패(DESIGN.md 3.1). 환경변수 조회와 `Console`을
   생성자로 받아 테스트 가능하게 했다. **프롬프트 경로 자체는 TTY가 필요해 테스트되지 않는다.**
+  `ClusterConnectionOptions`가 소유하므로 두 명령이 같은 경로를 탄다.
 - `ReportRenderer` / `ReportFormat` — 텍스트(사람)와 JSON(스크립트). JSON의 `collectedAt`은
   Jackson의 날짜 처리에 맡기지 않고 문자열로 직접 넣는다. 스크립트가 읽는 계약이 매퍼 설정
   변화에 흔들리면 안 된다.
@@ -257,14 +267,20 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
   그리고 **출하되는 명령 트리에 예외 핸들러가 붙어 있는지**.
 - `ExecutionErrorHandlerTest` (3개) — 예외가 1이 아니라 2로 나가는지, 메시지 없는 예외도
   뭔가는 말하는지, 스택 트레이스를 쏟지 않는지.
-- `CollectCommandTest` (5개) — 로컬 `HttpServer`로 실제 수집을 돌린다. 핵심은 **쓴 파일을
+- `CollectCommandTest` (5개) — `FakeCluster`로 실제 수집을 돌린다. 핵심은 **쓴 파일을
   `TarGzDumpSource`로 되읽어 15개 타깃이 그대로 나오는지** — 오프라인 리더가 못 읽는 덤프는
   쓸 이유가 없다. 그 외 부분 수집 보고, 덮어쓰기 거부(기존 내용 보존까지), 비밀번호 없을 때
   수집 전 중단, 기본 파일명 형식.
-- `DiagnoseCommandTest` (7개) — 스텁 룰로 발화·스킵을 만들어 검증한다(카탈로그가 비어 있으므로).
-  깨끗한 클러스터(exit 0), **룰 0개 경고**, 발화 시 evidence·recommendation 출력과 exit 1,
-  **SKIPPED가 종료 코드를 바꾸지 않는지**, JSON 필드, 없는 덤프(exit 2),
+- `DiagnoseCommandTest` (11개) — 리포트 계약은 스텁 룰로 검증한다(실제 룰의 발화 조건과
+  리포트 형식을 얽히게 하지 않기 위해). 깨끗한 클러스터(exit 0), **룰 0개 경고**,
+  발화 시 evidence·recommendation 출력과 exit 1, **SKIPPED가 종료 코드를 바꾸지 않는지**,
+  JSON 필드, 없는 덤프(exit 2),
   **REQUIRED 빠진 덤프가 조용히 "No findings"를 내지 않고 exit 2로 실패하는지**.
+  live 모드는 4개 — 파일을 남기지 않는지, **라이브에서도 같은 룰이 도는지**(설정을 바꾼
+  클러스터에서 OSC-003 발화 + exit 1), 두 입력 동시 지정 거부, 입력 없음 거부.
+- `FakeCluster` (testsupport) — 로컬 `HttpServer`가 픽스처로 응답한다. 수집기를 스텁으로
+  바꾸면 정작 검증하고 싶은 것(실제로 무언가와 통신하는가)이 사라지므로 진짜 소켓을 쓴다.
+  `HttpDumpSourceTest`는 지연·리다이렉트 같은 HTTP 동작 자체를 보므로 자체 서버를 유지한다.
 - `PasswordSourceTest` (3개) — 환경변수 경로, TTY도 변수도 없을 때 묻지 않고 실패, 빈 변수 허용.
 - **룰 테스트 (22개)** — 룰마다 양성·음성·경계 3종(DESIGN.md 6절). 경계 테스트는 매직 넘버가
   아니라 룰의 상수(`HEAP_PRESSURE_PERCENT`, `WARNING_RATIO`)를 참조한다.
@@ -318,6 +334,8 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 26 | 룰이 0개면 diagnose가 stderr로 경고한다 | 카탈로그가 비어 있는 빌드는 **무조건 "No findings"**를 낸다. 이건 구조적 미탐이라, 빈 리포트가 건강한 클러스터로 읽히지 않게 소리를 낸다. 룰이 생기면 조건이 저절로 거짓이 되어 사라진다. 덤프 스키마 버전 경고(결정 13)도 같은 자리에서 낸다 — 둘 다 "이 리포트는 보이는 것보다 좁다"는 뜻이기 때문 |
 | 27 | OSC-001은 `cat_indices`가 없어도 SKIPPED되지 않는다 (DESIGN.md 5 표 정정) | 발화 조건(브레이커 트립 + heap)이 REQUIRED 타깃인 `_nodes/stats`만으로 판정된다. `cat_indices`는 `top_queries-*` 방치 패턴을 덧붙이는 보강용일 뿐인데, 그것 때문에 서킷 브레이커 트립을 판정하지 않는 것은 손해가 더 크다 — 무관한 엔드포인트의 403이 진짜 장애를 가린다. 대신 evidence에 "확인하지 못했다"를 남긴다: 인덱스가 **없는 것**과 **못 본 것**은 다른 사실이다(결정 10과 같은 결) |
 | 28 | OSC-003의 조치안은 값이 실제로 있는 **scope**를 지운다 | 롤링 재시작 중에는 `transient`로 거는 것이 흔하고 transient가 persistent를 이긴다. 조치안이 persistent만 지우면 운영자가 그대로 실행해도 **allocation은 계속 꺼져 있고 본인은 켰다고 믿는다** — 동작하지 않는 조치안은 근거 없는 finding만큼 해롭다. 두 scope에 모두 `none`이면 둘 다 지운다(transient만 지우면 persistent가 살아난다). 발화 여부는 실효값으로 정하므로 transient `all`이 persistent `none`을 덮는 클러스터에서는 발화하지 않는다 |
+| 29 | 접속 옵션을 `ClusterConnectionOptions` 한 클래스로 공유 (`collect`는 `@Mixin`, `diagnose`는 배타 그룹 멤버) | DESIGN.md 3.2가 "같은 수집기를 쓰는 이상 인증 경로가 갈리면 안 된다"고 못 박았다. 옵션을 복사하면 도움말 문구부터 비밀번호 해석 순서까지 **언젠가 한쪽만 바뀐다** — 그때 갈라지는 것이 하필 인증이면 한쪽 명령에서만 익명 요청이 나가는 식의 사고가 된다. 비밀번호 해석(`PasswordSource` 소유)까지 이 클래스에 함께 둔 이유도 같다 |
+| 30 | `diagnose`의 입력 소스는 배타 그룹 `multiplicity = "1"` (기본값 없음) | `--input`과 `--endpoint` 중 하나를 조용히 우선하면 **리포트가 어느 클러스터 얘기인지 알 수 없다**. 덤프는 몇 달 전 다른 곳의 상태일 수 있어서, 잘못 고른 쪽으로 진단하면 존재하지 않는 장애를 보고하거나 실제 장애를 놓친다. 둘 다 없을 때 무언가를 기본값으로 고르지 않고 usage 오류(종료 코드 2)로 끝내는 것도 같은 이유다 |
 
 ## 8. 다음 단계
 
@@ -344,10 +362,12 @@ core가 지는 책임은 "사용자명과 비밀번호는 함께 있거나 함�
 
 룰 3개(3.1절)도 구현됐다. `rule.catalog` 패키지, OSC-001/002/003, 룰별 3종 테스트와
 `ClusterSnapshotBuilder` 헬퍼까지 DESIGN.md 5·6절대로다.
+`diagnose --endpoint` live 모드까지 붙으면서 **DESIGN.md 9절 4단계는 전부 끝났다.**
 
-**다음은 `diagnose --endpoint` live 모드**다 — `DumpSource` 구현체를 `HttpDumpSource`로
-바꾸고 collect의 접속 옵션(비밀번호 처리 포함)을 재사용하는 것이 전부다.
-그 뒤에 남는 것은 README(영문 필수, DESIGN.md 1)와 릴리스 버전 정리다.
+**다음은 README**다(영문 필수, DESIGN.md 1). 들어가야 하는 것:
+지원 버전(2.10 ~ 3.x, 그 미만은 미지원), 두 명령의 사용법과 종료 코드,
+비밀번호를 옵션으로 받지 않는다는 점, 그리고 **덤프에 인덱스명이 포함된다는 경고**
+(자동 마스킹은 v0.1 제외, DESIGN.md 6절). 그 다음이 릴리스 버전 정리다.
 
 ### 남은 숙제
 

@@ -357,7 +357,8 @@ OPTIONAL 타깃이 빠진 덤프를 별도로 둔다. 검증 대상은 두 가�
       스키마 버전 경고, 비밀번호 프롬프트/환경변수(3.1)
     - ~~diagnose offline 모드~~ ✅ 완료 — `--input`, 텍스트·JSON 리포트
     - ~~룰 3개~~ ✅ 완료 — OSC-001/002/003, `rule.catalog`
-    - `diagnose --endpoint` live 모드 ← **여기부터**
+    - ~~`diagnose --endpoint` live 모드~~ ✅ 완료 — 접속 옵션을 collect와 공유
+5. README(영문 필수, 1절) + 릴리스 버전 정리 ← **여기부터**
 
 3번을 4번보다 먼저 한 이유: 룰 3개를 만든 뒤에 `RuleResult`로 바꾸면 룰과 룰 테스트를
 전부 다시 손봐야 한다. 룰 시그니처가 굳지 않은 시점이 비용이 가장 낮았다.
