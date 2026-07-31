@@ -5,7 +5,10 @@ plugins {
 }
 
 group = 'com.nj.oss.check'
-version = '0.0.1-SNAPSHOT'
+// Stamped into the jar manifest, and from there into --version and every
+// dump's toolVersion. A dump outlives the run that produced it, so this is
+// the only thing telling a later reader what built it (ToolVersion).
+version = '0.1.0-SNAPSHOT'
 description = 'oss-check'
 
 java {
