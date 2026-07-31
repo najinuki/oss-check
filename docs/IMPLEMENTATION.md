@@ -375,9 +375,11 @@ v0.2 백로그(DESIGN.md 8절)다.
 
 ### 남은 숙제
 
-- **루트 엔드포인트의 2xx 파손 응답** (아직 결정 전): 지금은 이름·버전을 null로 두고
-  넘어가는데, 루트는 `CollectTarget`이 아니라 `CollectionOutcome`에도 사유가 남지 않는다.
-  기록하려면 `metadata.json` 스키마 변경이므로 DESIGN.md 3.1 선행.
+- **클러스터 식별 실패가 아직 기록되지 않는다.** 지금은 루트가 403이든 2xx인데 본문이
+  JSON이 아니든 이름·버전을 null로 두고 조용히 넘어간다. **설계는 정해졌다** —
+  `metadata.json`에 `identityFailure` 필드(DESIGN.md 3.1). 구현이 남았다:
+  `SnapshotMetadata`에 필드 추가, `HttpDumpSource.fetchIdentity()`가 사유를 채우고,
+  리포트 헤더가 그것을 노출하는 것까지.
 - **`CollectTarget.path()`의 query 파라미터가 테스트로 검증되지 않는다.** 테스트 서버가
   경로만 기록하므로 `bytes=b`(결정 1)·`include_defaults=true`·`format=json`이 누락돼도
   테스트가 통과한다.
