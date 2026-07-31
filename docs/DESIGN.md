@@ -165,11 +165,12 @@ AutoOps 이벤트 카탈로그(pending tasks, 플러그인 호환성, 세그먼�
 
 ```json
 {
-  "cluster_name": null,
-  "cluster_version": null,
   "identity_failure": "root endpoint returned HTTP 200 but the body was not JSON: <!DOCTYPE html>…"
 }
 ```
+
+식별에 실패했으므로 `cluster_name`·`cluster_version`은 **아예 없다**. 이 파일은 null을 쓰지
+않는다 — 없는 것은 없는 대로 둔다.
 
 - **식별에 성공하면 이 필드는 없다.** 있다는 것 자체가 실패했다는 뜻이다.
 - 두 경우를 모두 덮는다: 루트가 **거부된 경우**(403 등)와 **2xx인데 본문이 JSON이 아닌 경우**.

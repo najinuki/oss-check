@@ -1,6 +1,8 @@
 package com.nj.oss.check.collect;
 
 import com.nj.oss.check.snapshot.SnapshotMetadata;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.json.JsonMapper;
@@ -62,6 +64,12 @@ public final class HttpDumpSource implements DumpSource {
     private final HttpClient client;
     private final JsonMapper mapper = JsonMapper.builder()
             .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+            // Absent means absent. A null written out is noise in a file that
+            // has to stay readable by hand years from now, and the identity
+            // failure field in particular is defined by its presence.
+            .changeDefaultPropertyInclusion(inclusion -> inclusion.withValueInclusion(Include.NON_NULL))
+            .addMixIn(SnapshotMetadata.class, NoDerivedState.class)
+            .addMixIn(CollectionOutcome.class, NoDerivedState.class)
             .build();
 
     public HttpDumpSource(ClusterConnection connection, String toolVersion) {
@@ -247,6 +255,34 @@ public final class HttpDumpSource implements DumpSource {
         public X509Certificate[] getAcceptedIssuers() {
             return new X509Certificate[0];
         }
+    }
+
+    /**
+     * Keeps convenience accessors out of the archive. {@code isOk()},
+     * {@code isIdentified()} and {@code isNewerThanSupported()} read as bean
+     * getters to Jackson, so without this they are written to the file
+     * alongside the values they are derived from.
+     *
+     * <p>Two of them would be actively misleading there. {@code ok} restates
+     * {@code status}, giving a file that is read months later two answers to
+     * the same question. {@code newer_than_supported} is a judgment the
+     * <em>reader</em> makes by comparing the dump against its own version — at
+     * write time it is always false, so storing it means storing a fact that
+     * was never true of anything but the writer.
+     *
+     * <p>The mixin lives here rather than as annotations on the records so that
+     * the model stays free of wire-format concerns.
+     */
+    private abstract static class NoDerivedState {
+
+        @JsonIgnore
+        abstract boolean isOk();
+
+        @JsonIgnore
+        abstract boolean isIdentified();
+
+        @JsonIgnore
+        abstract boolean isNewerThanSupported();
     }
 
     private record ClusterIdentity(String clusterName, String clusterVersion, String failure) {

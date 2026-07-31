@@ -230,6 +230,20 @@ class HttpDumpSourceTest {
         assertThat(identityFailure()).isNull();
     }
 
+    @Test
+    void metadataRecordsWhatWasCollectedAndNothingDerivedFromIt() throws IOException {
+        String metadata = source().load().metadataJson();
+
+        // "ok" restates "status", and "newer_than_supported" is a judgment the
+        // reader makes against its own version — always false when written
+        assertThat(metadata)
+                .contains("\"status\":\"OK\"")
+                .doesNotContain("\"ok\"", "\"identified\"", "\"newer_than_supported\"");
+        // absent means absent, so the identity failure field is defined by
+        // its presence rather than by its value
+        assertThat(metadata).doesNotContain("null");
+    }
+
     private String identityFailure() {
         try {
             return new ClusterSnapshotParser().parse(source().load()).metadata().identityFailure();
