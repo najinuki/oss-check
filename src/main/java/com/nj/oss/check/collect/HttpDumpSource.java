@@ -106,6 +106,7 @@ public final class HttpDumpSource implements DumpSource {
                 toolVersion,
                 identity.clusterName(),
                 identity.clusterVersion(),
+                identity.failure(),
                 outcomes);
         return new RawDump(mapper.writeValueAsString(metadata), payloads);
     }
@@ -116,20 +117,34 @@ public final class HttpDumpSource implements DumpSource {
      * state. Failure here is not fatal: an unnamed dump is still diagnosable,
      * and if the cluster is truly unreachable the REQUIRED targets will say so
      * with a better message.
+     *
+     * <p>It is recorded, though. Without a reason, a nameless dump looks the
+     * same whether the endpoint was denied, fronted by a proxy that answered
+     * with its login page, or something else entirely (DESIGN.md 3.1).
      */
     private ClusterIdentity fetchIdentity() throws InterruptedIOException {
         Fetched fetched = fetch("");
         if (!fetched.isOk()) {
-            return new ClusterIdentity(null, null);
+            return ClusterIdentity.unidentified("root endpoint " + fetched.describe());
         }
+        JsonNode root;
         try {
-            JsonNode root = mapper.readTree(fetched.body());
-            return new ClusterIdentity(
-                    root.path("cluster_name").asString(null),
-                    root.path("version").path("number").asString(null));
+            root = mapper.readTree(fetched.body());
         } catch (RuntimeException e) {
-            return new ClusterIdentity(null, null);
+            // A 2xx whose body is not JSON is the signature of something
+            // answering on the cluster's behalf, so the body says more than the
+            // exception does.
+            return ClusterIdentity.unidentified(
+                    "root endpoint returned HTTP " + fetched.httpStatus()
+                            + " but the body was not JSON: " + truncate(fetched.body()));
         }
+        String name = root.path("cluster_name").asString(null);
+        String version = root.path("version").path("number").asString(null);
+        if (name == null && version == null) {
+            return ClusterIdentity.unidentified(
+                    "root endpoint returned JSON without cluster_name or version");
+        }
+        return new ClusterIdentity(name, version, null);
     }
 
     /**
@@ -234,7 +249,11 @@ public final class HttpDumpSource implements DumpSource {
         }
     }
 
-    private record ClusterIdentity(String clusterName, String clusterVersion) {
+    private record ClusterIdentity(String clusterName, String clusterVersion, String failure) {
+
+        static ClusterIdentity unidentified(String failure) {
+            return new ClusterIdentity(null, null, failure);
+        }
     }
 
     /** One HTTP attempt: either a body, or why there is none. */

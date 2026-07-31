@@ -135,18 +135,21 @@ AutoOps 이벤트 카탈로그(pending tasks, 플러그인 호환성, 세그먼�
 
 ```json
 {
-  "dumpSchemaVersion": 1,
-  "collectedAt": "2026-07-27T04:11:00Z",
-  "toolVersion": "0.1.0",
-  "clusterName": "prod-search",
-  "clusterVersion": "2.19.1",
+  "dump_schema_version": 1,
+  "collected_at": "2026-07-27T04:11:00Z",
+  "tool_version": "0.1.0",
+  "cluster_name": "prod-search",
+  "cluster_version": "2.19.1",
   "collection": [
-    { "target": "CLUSTER_HEALTH",     "status": "OK",     "httpStatus": 200 },
-    { "target": "ALLOCATION_EXPLAIN", "status": "FAILED", "httpStatus": 400, "message": "unable to find any unassigned shards" },
-    { "target": "CAT_INDICES",        "status": "FAILED", "httpStatus": 403, "message": "no permissions for [indices:monitor/stats]" }
+    { "target": "CLUSTER_HEALTH",     "status": "OK",     "http_status": 200 },
+    { "target": "ALLOCATION_EXPLAIN", "status": "FAILED", "http_status": 400, "message": "unable to find any unassigned shards" },
+    { "target": "CAT_INDICES",        "status": "FAILED", "http_status": 403, "message": "no permissions for [indices:monitor/stats]" }
   ]
 }
 ```
+
+키는 **snake_case**다. 이 파일은 아카이브 안에서 OpenSearch 응답들과 나란히 놓이므로
+같은 표기를 쓴다. (`diagnose --format json`의 리포트는 별개 산출물이라 camelCase다.)
 
 - **수집 리포트가 있어야 "왜 이 룰이 안 돌았나"를 덤프 하나만 보고 답할 수 있다.**
   덤프는 폐쇄망에서 반출돼 몇 달 뒤 다른 곳에서 열리는 물건이므로, 수집 당시의 실패 사유가
@@ -162,9 +165,9 @@ AutoOps 이벤트 카탈로그(pending tasks, 플러그인 호환성, 세그먼�
 
 ```json
 {
-  "clusterName": null,
-  "clusterVersion": null,
-  "identityFailure": "HTTP 200 but the body was not JSON: <!DOCTYPE html><html>…"
+  "cluster_name": null,
+  "cluster_version": null,
+  "identity_failure": "root endpoint returned HTTP 200 but the body was not JSON: <!DOCTYPE html>…"
 }
 ```
 

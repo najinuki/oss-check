@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -201,6 +202,40 @@ class HttpDumpSourceTest {
         assertThat(snapshot.metadata().clusterName()).isNull();
         assertThat(snapshot.metadata().clusterVersion()).isNull();
         assertThat(snapshot.health()).isNotNull();
+        // and the dump says why it has no name, since nothing else records it
+        assertThat(snapshot.metadata().isIdentified()).isFalse();
+        assertThat(snapshot.metadata().identityFailure()).contains("HTTP 403", "denied");
+    }
+
+    @Test
+    void aProxyAnsweringForTheClusterIsRecordedRatherThanSwallowed() {
+        // a login page returned with 200 is what an authenticating proxy in
+        // front of the cluster looks like; without the body in the reason,
+        // "unknown cluster" is indistinguishable from a permissions problem
+        serve("/", "<!DOCTYPE html><html><body>Sign in</body></html>");
+
+        assertThat(identityFailure())
+                .contains("HTTP 200", "not JSON", "Sign in");
+    }
+
+    @Test
+    void aRootResponseWithoutIdentityFieldsIsRecorded() {
+        serve("/", "{ \"tagline\": \"You Know, for Search\" }");
+
+        assertThat(identityFailure()).contains("without cluster_name");
+    }
+
+    @Test
+    void anIdentifiedClusterRecordsNoFailure() {
+        assertThat(identityFailure()).isNull();
+    }
+
+    private String identityFailure() {
+        try {
+            return new ClusterSnapshotParser().parse(source().load()).metadata().identityFailure();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Test

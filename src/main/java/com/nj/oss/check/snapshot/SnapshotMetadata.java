@@ -16,8 +16,14 @@ import java.util.Optional;
  *                          no value for it — never null after construction
  * @param collectedAt       when the dump was taken (UTC)
  * @param toolVersion       version of the tool that produced the dump
- * @param clusterName       cluster name at collection time
+ * @param clusterName       cluster name at collection time, null when the
+ *                          cluster could not be identified
  * @param clusterVersion    OpenSearch version reported by the cluster root endpoint
+ * @param identityFailure   why the cluster could not be identified, null when it
+ *                          could. The root endpoint is not a {@link CollectTarget},
+ *                          so a failure there has nowhere else to be recorded —
+ *                          and "a dump of nothing in particular" is worth
+ *                          explaining to whoever opens it later (DESIGN.md 3.1)
  * @param collection        per-target collection outcome; entries referring to
  *                          targets this version does not know are dropped
  */
@@ -27,6 +33,7 @@ public record SnapshotMetadata(
         String toolVersion,
         String clusterName,
         String clusterVersion,
+        String identityFailure,
         List<CollectionOutcome> collection) {
 
     /**
@@ -54,6 +61,11 @@ public record SnapshotMetadata(
      */
     public boolean isNewerThanSupported() {
         return dumpSchemaVersion > CURRENT_DUMP_SCHEMA_VERSION;
+    }
+
+    /** Whether the cluster this dump came from could be named at all. */
+    public boolean isIdentified() {
+        return identityFailure == null;
     }
 
     /** Collection outcome for one target, empty when the dump records none. */

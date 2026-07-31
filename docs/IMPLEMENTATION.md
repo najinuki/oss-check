@@ -66,7 +66,7 @@ com.nj.oss.check
 
 | 필드 | 타입 | 원본 API |
 |---|---|---|
-| `metadata` | `SnapshotMetadata` — 덤프 스키마 버전·수집 시각·도구 버전·클러스터 이름/버전·수집 리포트 | collect가 쓰는 `metadata.json` |
+| `metadata` | `SnapshotMetadata` — 덤프 스키마 버전·수집 시각·도구 버전·클러스터 이름/버전·**식별 실패 사유**·수집 리포트 | collect가 쓰는 `metadata.json` |
 | `health` | `ClusterHealth` — status(enum GREEN/YELLOW/RED), 노드 수, 샤드 카운트류 | `_cluster/health` (REQUIRED) |
 | `nodesStats` | `NodesStats` — 노드ID→NodeStats(name, roles, JVM heap, breakers 맵) | `_nodes/stats` (REQUIRED) |
 | `settings` | `Optional<ClusterSettings>` — persistent/transient/defaults 3개 스코프, dotted key 평탄화 맵 | `_cluster/settings?include_defaults=true` |
@@ -282,6 +282,8 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
   바꾸면 정작 검증하고 싶은 것(실제로 무언가와 통신하는가)이 사라지므로 진짜 소켓을 쓴다.
   `HttpDumpSourceTest`는 지연·리다이렉트 같은 HTTP 동작 자체를 보므로 자체 서버를 유지한다.
 - `PasswordSourceTest` (3개) — 환경변수 경로, TTY도 변수도 없을 때 묻지 않고 실패, 빈 변수 허용.
+- `ReportRendererTest` (3개) — 헤더가 클러스터를 밝히는지, **이름이 없을 때 그 이유를 말하는지**,
+  JSON 리포트에도 같은 사유가 실리는지(결정 31).
 - **룰 테스트 (22개)** — 룰마다 양성·음성·경계 3종(DESIGN.md 6절). 경계 테스트는 매직 넘버가
   아니라 룰의 상수(`HEAP_PRESSURE_PERCENT`, `WARNING_RATIO`)를 참조한다.
   음성 테스트는 전부 정상 픽스처 그대로를 넣는다 — 오탐 방어선이다.
@@ -336,6 +338,7 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 28 | OSC-003의 조치안은 값이 실제로 있는 **scope**를 지운다 | 롤링 재시작 중에는 `transient`로 거는 것이 흔하고 transient가 persistent를 이긴다. 조치안이 persistent만 지우면 운영자가 그대로 실행해도 **allocation은 계속 꺼져 있고 본인은 켰다고 믿는다** — 동작하지 않는 조치안은 근거 없는 finding만큼 해롭다. 두 scope에 모두 `none`이면 둘 다 지운다(transient만 지우면 persistent가 살아난다). 발화 여부는 실효값으로 정하므로 transient `all`이 persistent `none`을 덮는 클러스터에서는 발화하지 않는다 |
 | 29 | 접속 옵션을 `ClusterConnectionOptions` 한 클래스로 공유 (`collect`는 `@Mixin`, `diagnose`는 배타 그룹 멤버) | DESIGN.md 3.2가 "같은 수집기를 쓰는 이상 인증 경로가 갈리면 안 된다"고 못 박았다. 옵션을 복사하면 도움말 문구부터 비밀번호 해석 순서까지 **언젠가 한쪽만 바뀐다** — 그때 갈라지는 것이 하필 인증이면 한쪽 명령에서만 익명 요청이 나가는 식의 사고가 된다. 비밀번호 해석(`PasswordSource` 소유)까지 이 클래스에 함께 둔 이유도 같다 |
 | 30 | `diagnose`의 입력 소스는 배타 그룹 `multiplicity = "1"` (기본값 없음) | `--input`과 `--endpoint` 중 하나를 조용히 우선하면 **리포트가 어느 클러스터 얘기인지 알 수 없다**. 덤프는 몇 달 전 다른 곳의 상태일 수 있어서, 잘못 고른 쪽으로 진단하면 존재하지 않는 장애를 보고하거나 실제 장애를 놓친다. 둘 다 없을 때 무언가를 기본값으로 고르지 않고 usage 오류(종료 코드 2)로 끝내는 것도 같은 이유다 |
+| 31 | 클러스터 식별 실패를 `metadata.json`의 `identity_failure`로 기록 (DESIGN.md 3.1) | 루트 엔드포인트는 `CollectTarget`이 아니라 수집 리포트에 남을 자리가 없어, 403이든 "2xx인데 본문이 JSON이 아님"이든 이름·버전만 null이 되고 이유가 사라졌다. 후자는 앞단 프록시가 로그인 페이지를 200으로 돌려주는 전형적인 상황이라 실제로 마주친다. **본문 자체는 저장하지 않는다** — 그 HTML을 파일로 넣으면 결정 11("payload가 있는데 파손이면 예외")에 걸려 덤프 전체가 안 읽힌다. 사유 문자열만 남기고 리포트 헤더가 그것을 노출한다. 필드 추가는 구조를 깨지 않으므로 `dumpSchemaVersion`은 올리지 않았다. 부수적으로 **DESIGN.md 3.1의 `metadata.json` 예시가 camelCase로 적혀 있던 것을 실제 wire format인 snake_case로 정정**했다 — 문서대로 손으로 덤프를 만들면 파서가 못 읽는 상태였다 |
 
 ## 8. 다음 단계
 
@@ -375,14 +378,6 @@ v0.2 백로그(DESIGN.md 8절)다.
 
 ### 남은 숙제
 
-- **클러스터 식별 실패가 아직 기록되지 않는다.** 지금은 루트가 403이든 2xx인데 본문이
-  JSON이 아니든 이름·버전을 null로 두고 조용히 넘어간다. **설계는 정해졌다** —
-  `metadata.json`에 `identityFailure` 필드(DESIGN.md 3.1). 구현이 남았다:
-  `SnapshotMetadata`에 필드 추가, `HttpDumpSource.fetchIdentity()`가 사유를 채우고,
-  리포트 헤더가 그것을 노출하는 것까지.
-- **`CollectTarget.path()`의 query 파라미터가 테스트로 검증되지 않는다.** 테스트 서버가
-  경로만 기록하므로 `bytes=b`(결정 1)·`include_defaults=true`·`format=json`이 누락돼도
-  테스트가 통과한다.
 - **비밀번호 프롬프트 경로가 테스트되지 않는다.** TTY가 필요해서다. 환경변수 경로와
   "TTY도 변수도 없으면 실패"는 테스트된다.
 - **릴리스 시 `-SNAPSHOT`을 떼야 한다.** 버전은 `build.gradle` 한 곳에서 jar 매니페스트로,

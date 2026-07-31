@@ -64,6 +64,7 @@ final class ReportRenderer {
                 new JsonCluster(
                         metadata.clusterName(),
                         metadata.clusterVersion(),
+                        metadata.identityFailure(),
                         // Written as text rather than left to the mapper's date
                         // handling: this field is a script's contract.
                         metadata.collectedAt() == null ? null : metadata.collectedAt().toString(),
@@ -72,8 +73,15 @@ final class ReportRenderer {
                 report.skipped()));
     }
 
+    /**
+     * Says why the cluster has no name when it has none. "unknown cluster" on
+     * its own blurs a cluster that reported nothing into one we were not
+     * allowed to ask — the same distinction the rest of this tool keeps.
+     */
     private static String header(SnapshotMetadata metadata) {
-        String name = metadata.clusterName() == null ? "unknown cluster" : metadata.clusterName();
+        String name = metadata.clusterName() == null
+                ? "unknown cluster" + (metadata.isIdentified() ? "" : " (" + metadata.identityFailure() + ")")
+                : metadata.clusterName();
         String version = metadata.clusterVersion() == null
                 ? ""
                 : " (OpenSearch " + metadata.clusterVersion() + ")";
@@ -88,6 +96,11 @@ final class ReportRenderer {
     private record JsonReport(JsonCluster cluster, List<Finding> findings, List<SkippedRule> skipped) {
     }
 
-    private record JsonCluster(String name, String version, String collectedAt, String toolVersion) {
+    private record JsonCluster(
+            String name,
+            String version,
+            String identityFailure,
+            String collectedAt,
+            String toolVersion) {
     }
 }
