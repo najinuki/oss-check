@@ -3,14 +3,15 @@
 > 이 문서는 [DESIGN.md](DESIGN.md)의 설계 결정을 코드로 옮기면서 확정한 구현 구조와
 > 진행 중 내린 세부 결정의 기록이다. 설계 자체의 변경은 DESIGN.md에서만 다룬다.
 >
-> 마지막 갱신: 2026-07-30 (DESIGN.md 9절 기준 4단계 진행 중 — 수집 계층 구현 완료,
-> CLI 와이어링 이전 시점)
+> 마지막 갱신: 2026-07-31 (DESIGN.md 9절 기준 4단계 진행 중 — 수집 계층과 CLI 계층 구현
+> 완료, 룰 0개 상태. `diagnose` live 모드는 아직 없다)
 
 ## 1. 패키지 구조
 
 ```
 com.nj.oss.check
-├── OssCheckApplication          # Spring Boot 진입점 (CLI 와이어링은 아직)
+├── OssCheckApplication          # Spring Boot 진입점 (컨텍스트 기동 → picocli 실행)
+├── cli/                         # 명령·옵션·출력·종료 코드 (Spring/picocli 와이어링)
 ├── snapshot/                    # ClusterSnapshot 모델 (record·enum, 순수 Java)
 │   └── parse/                   # wire format을 아는 유일한 곳 (파서·예외)
 ├── rule/                        # 룰 엔진 + 룰 공통 타입 (순수 Java)
@@ -172,7 +173,39 @@ DESIGN.md 4.2의 인터페이스를 그대로 구현:
   **경고 출력은 CLI 계층 몫이다** — core는 로깅 프레임워크에 의존하지 않는다.
 - 모르는 파일/모르는 `CollectTarget` 이름/모르는 `Status`는 전부 무시하거나 `UNKNOWN`으로 흡수한다.
 
-## 5. 테스트 현황
+## 5. `cli` 패키지 — 명령 계층
+
+**Spring과 picocli 와이어링이 사는 유일한 곳.** core(`snapshot`/`rule`/`collect`)는 이 패키지를
+알지 못하고, 환경변수·TTY·파일시스템 경로·터미널 출력 같은 "바깥 세상"은 전부 여기서 다룬다.
+
+```
+collect:   옵션 → ClusterConnection → HttpDumpSource → RawDump → TarGzDumpWriter → 파일
+diagnose:  --input → TarGzDumpSource → RawDump → ClusterSnapshotParser → RuleEngine → 리포트
+```
+
+- `OssCheckCommand` — 최상위 `oss-check`. 자체 옵션 없이 `collect`/`diagnose`만 단다(DESIGN.md 3).
+  서브커맨드 없이 실행하면 usage를 내고 **종료 코드 2**로 끝난다 — 조용히 0으로 끝나면
+  스크립트가 성공으로 읽는다. 정적 메서드 `commandLine(factory)`가 명령 트리 조립을 한 곳에
+  모으므로 **main과 테스트가 같은 배선을 쓴다**(예외 핸들러가 실제로 붙어 있는지를 테스트가 본다).
+- `CollectCommand` — `--endpoint`(필수) / `--user` / `--insecure` / `--output`.
+  부분 수집이면 빠진 타깃을 이름으로 나열하고 `metadata.json`을 가리킨다.
+- `DiagnoseCommand` — `--input`(필수) / `--format text|json`. **live 모드(`--endpoint`)는 아직 없다**
+  — `DumpSource` 구현체만 갈아끼우면 되므로 룰 이후로 미뤘다(DESIGN.md 9절).
+- `PasswordSource` — 환경변수 → TTY 프롬프트 → 실패(DESIGN.md 3.1). 환경변수 조회와 `Console`을
+  생성자로 받아 테스트 가능하게 했다. **프롬프트 경로 자체는 TTY가 필요해 테스트되지 않는다.**
+- `ReportRenderer` / `ReportFormat` — 텍스트(사람)와 JSON(스크립트). JSON의 `collectedAt`은
+  Jackson의 날짜 처리에 맡기지 않고 문자열로 직접 넣는다. 스크립트가 읽는 계약이 매퍼 설정
+  변화에 흔들리면 안 된다.
+- `ExitCode` — 0/1/2를 상수와 근거로 고정(DESIGN.md 3.2).
+- `ExecutionErrorHandler` — 명령에서 새어나온 예외를 종료 코드 2로 바꾼다(결정 24).
+- `ToolVersion` — jar 매니페스트에서 읽고 없으면 `"dev"`. 버전을 코드에 박아두면
+  덤프가 빌드하지 않은 버전을 주장할 수 있다.
+- `SpringFactory` — picocli가 명령을 Spring 빈으로 만들게 하는 다리(결정 23).
+
+**출력 스트림 규약**: stdout은 결과(덤프 경로, 진단 리포트), stderr는 경고·에러.
+스크립트가 stdout만 읽어도 되게 한다.
+
+## 6. 테스트 현황
 
 DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 
@@ -194,6 +227,19 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 - `TarGzDumpRoundTripTest` — 쓰기→읽기 왕복, 파일명 매칭, 모르는 엔트리 무시.
 - `ClusterConnectionTest` (7개) — 자격증명 짝 불변식(결정 22), 빈 비밀번호 허용,
   endpoint의 userinfo 거부 시 **예외 메시지에 비밀번호가 없는지**, scheme 제한(결정 19).
+- `OssCheckCommandTest` (5개) — 도움말, 무인자 실행이 2로 끝나는지, 모르는 옵션, `--version`,
+  그리고 **출하되는 명령 트리에 예외 핸들러가 붙어 있는지**.
+- `ExecutionErrorHandlerTest` (3개) — 예외가 1이 아니라 2로 나가는지, 메시지 없는 예외도
+  뭔가는 말하는지, 스택 트레이스를 쏟지 않는지.
+- `CollectCommandTest` (5개) — 로컬 `HttpServer`로 실제 수집을 돌린다. 핵심은 **쓴 파일을
+  `TarGzDumpSource`로 되읽어 15개 타깃이 그대로 나오는지** — 오프라인 리더가 못 읽는 덤프는
+  쓸 이유가 없다. 그 외 부분 수집 보고, 덮어쓰기 거부(기존 내용 보존까지), 비밀번호 없을 때
+  수집 전 중단, 기본 파일명 형식.
+- `DiagnoseCommandTest` (7개) — 스텁 룰로 발화·스킵을 만들어 검증한다(카탈로그가 비어 있으므로).
+  깨끗한 클러스터(exit 0), **룰 0개 경고**, 발화 시 evidence·recommendation 출력과 exit 1,
+  **SKIPPED가 종료 코드를 바꾸지 않는지**, JSON 필드, 없는 덤프(exit 2),
+  **REQUIRED 빠진 덤프가 조용히 "No findings"를 내지 않고 exit 2로 실패하는지**.
+- `PasswordSourceTest` (3개) — 환경변수 경로, TTY도 변수도 없을 때 묻지 않고 실패, 빈 변수 허용.
 - `HttpDumpSourceTest` (12개) — **실제 `HttpServer`를 띄워** 검증한다(HTTP 클라이언트를
   목으로 대체하면 정작 검증하고 싶은 것이 사라진다). 픽스처는 파서 테스트와 같은
   `fixtures/normal/`을 응답 본문으로 재사용한다.
@@ -207,7 +253,7 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 
 룰별 3종 픽스처(양성/음성/경계)와 `ClusterSnapshotBuilder` 헬퍼는 룰 구현과 함께 작성한다.
 
-## 6. 구현 중 내린 세부 결정 (결정 로그)
+## 7. 구현 중 내린 세부 결정 (결정 로그)
 
 | # | 결정 | 이유 |
 |---|---|---|
@@ -233,8 +279,12 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 20 | 자동 리다이렉트 비활성화 (`Redirect.NEVER`) | 모든 요청에 Basic 인증 헤더를 직접 붙이므로, 리다이렉트를 따라가면 `Location`이 가리키는 아무 호스트에나 자격증명이 갈 수 있다. OpenSearch API는 리다이렉트하지 않으니 얻을 것이 없는 위험이다. 끄고 나면 JDK가 cross-origin 리다이렉트에서 `Authorization`을 떼는지 여부도 따질 필요가 없어진다 |
 | 21 | `--insecure`의 범위를 **인증서 신뢰**로 한정 (호스트명 검증은 유지) | JDK `HttpClient`는 넘겨받은 `SSLParameters`와 무관하게 HTTPS endpoint identification을 다시 켠다. 즉 `setEndpointIdentificationAlgorithm(null)`은 효과가 없었고, 호스트명 검증을 실제로 끄는 방법은 JVM 전역 시스템 속성(`jdk.internal.httpclient.disableHostnameVerification`)뿐인데 이는 프로세스 전체에 영향을 준다. 동작하지 않는 코드와 "이게 동작한다"고 주장하는 주석을 남기는 대신 **계약을 실제 동작에 맞췄다** — DESIGN.md 3.1의 "자체 서명 인증서 허용"과도 이미 일치한다. IP로 접속하려면 그 IP를 포함한 인증서가 필요하다는 제약은 `ClusterConnection` Javadoc에 명시 |
 | 22 | `username`/`password` 짝 불변식을 `ClusterConnection` 생성자에서 강제 (빈 사용자명도 거부) | DESIGN.md 3.1이 `--password` 옵션을 없애고 프롬프트/환경변수로 바꾸면서 "함께 있거나 함께 없다"를 확정했다. 한쪽만 있으면 `hasCredentials()`가 `false`가 되어 **사용자는 인증했다고 믿는데 익명 요청이 나가고**, 돌아온 401/403이 수집 리포트에 "이 계정에 권한 없음"으로 박힌다 — 설정 실수가 클러스터 권한 문제로 위장되고, 덤프를 몇 달 뒤 여는 사람은 그 위장을 풀 수 없다. 불변식이 생기면서 `hasCredentials()`는 `username != null`로 단순해졌다. **빈 문자열 비밀번호는 허용**한다: 일부러 준 빈 값과 아예 안 온 것(`null`)은 다른 사실이라는 결정 10과 같은 결이다. 환경변수·프롬프트·TTY 판정은 전부 CLI 몫이고 core는 이 불변식만 진다 |
+| 23 | Spring을 **인자 없이** 기동하고 argv는 picocli에만 넘긴다 (`CommandLineRunner` 미사용) | 둘 다에게 argv를 주면 `--user admin` 같은 옵션이 Spring 애플리케이션 프로퍼티로 해석된다. 덤으로 `CommandLineRunner`를 안 쓰므로 `@SpringBootTest`가 컨텍스트를 띄우면서 CLI를 실행해버리는 문제도 없다. Spring은 빈만 제공하고 명령줄의 주인은 picocli다 |
+| 24 | 명령에서 새어나온 예외를 종료 코드 **2**로 매핑 (`ExecutionErrorHandler`) | picocli의 기본 실행 예외 종료 코드는 1인데 이 도구에서 1은 **"finding 발견"**이다(DESIGN.md 3.2). 그대로 두면 접속 불가·덤프 파손 같은 실행 실패를 스크립트가 **진단 결과로 오인**한다. Spring 기동 실패도 같은 이유로 `main`에서 잡는다. 운영자에게는 스택 트레이스가 아니라 한 줄 메시지를 준다 |
+| 25 | 덤프 덮어쓰기 금지를 **두 겹**으로 (CLI 사전 검사 + `CREATE_NEW`) | 사전 검사만으로는 수집이 도는 수십 초 동안 같은 경로에 파일이 생기면 그대로 덮어쓴다(TOCTOU). 실제 보장은 `TarGzDumpWriter`가 `StandardOpenOption.CREATE_NEW`로 파일을 만들며 원자적으로 거부하는 것이고, CLI의 사전 검사는 **60초 수집 후에 실패를 알리지 않기 위한 예의**다. 보장을 라이터에 두면 앞으로 어떤 호출자도 덤프를 실수로 날릴 수 없다. 대신 `CREATE_NEW`는 부작용을 하나 만든다 — 쓰다 실패하면(디스크 부족 등) 반쪽 파일이 남아 **재시도까지 막는다**. 그래서 쓰기 실패 시 이 호출이 만든 파일을 지운다. 임시 파일+rename은 이름 선점 시점이 뒤로 밀려 동시 실행 방어가 약해지므로 택하지 않았다. JVM이 쓰는 도중 죽으면 반쪽 파일이 남는 것은 이 선택의 잔여 비용이다 |
+| 26 | 룰이 0개면 diagnose가 stderr로 경고한다 | 카탈로그가 비어 있는 빌드는 **무조건 "No findings"**를 낸다. 이건 구조적 미탐이라, 빈 리포트가 건강한 클러스터로 읽히지 않게 소리를 낸다. 룰이 생기면 조건이 저절로 거짓이 되어 사라진다. 덤프 스키마 버전 경고(결정 13)도 같은 자리에서 낸다 — 둘 다 "이 리포트는 보이는 것보다 좁다"는 뜻이기 때문 |
 
-## 7. 다음 단계
+## 8. 다음 단계
 
 DESIGN.md 9절 4단계 — **collect 구현(HTTP 수집기 + tar.gz 생성) → diagnose offline 모드
 → 룰 3개 → live 모드** 순서. 이 문서는 각 단계 완료 시 갱신한다.
@@ -249,16 +299,20 @@ DESIGN.md 9절 4단계 — **collect 구현(HTTP 수집기 + tar.gz 생성) → 
 - `allocation/explain`의 HTTP 400은 실패로 기록하되(결정 2의 "설명할 것 없음"),
   이는 정상 클러스터의 기대 동작이므로 collect 종료 코드에 영향을 주지 않는다.
 
-**다음은 CLI 계층 와이어링**이다 — picocli `collect` / `diagnose` 명령을 Spring 진입점에
-붙이고, 지금까지 core에서 의도적으로 미뤄둔 것들을 여기서 처리한다:
-덤프 스키마 버전 경고 출력(결정 13), 종료 코드 결정(DESIGN.md 3.2),
-그리고 **비밀번호 프롬프트/환경변수 처리**(DESIGN.md 3.1).
+CLI 계층(5절)도 구현됐다. core가 의도적으로 미뤄뒀던 것들이 여기서 처리됐다:
+덤프 스키마 버전 경고 출력(결정 13), 종료 코드(DESIGN.md 3.2),
+비밀번호 프롬프트/환경변수(DESIGN.md 3.1).
 
 비밀번호 처리는 계층이 갈린다. **환경변수를 읽고 프롬프트를 띄우고 TTY를 판정하는 것은
 전부 CLI의 일**이다 — `ClusterConnection`이 환경을 알게 되면 core의 환경 비의존이 깨진다.
-core가 지는 책임은 "사용자명과 비밀번호는 함께 있거나 함께 없다"는 불변식뿐이다(아래).
+core가 지는 책임은 "사용자명과 비밀번호는 함께 있거나 함께 없다"는 불변식뿐이다(결정 22).
 
-### 수집 계층에 남은 숙제
+**다음은 룰 3개**다 — `rule.catalog` 패키지 생성(결정 16), OSC-001/002/003,
+룰별 3종 픽스처(양성·음성·경계)와 `ClusterSnapshotBuilder` 헬퍼(DESIGN.md 6절).
+그 다음이 `diagnose --endpoint` live 모드로, `DumpSource` 구현체 교체와
+접속 옵션 재사용이 전부다.
+
+### 남은 숙제
 
 - **루트 엔드포인트의 2xx 파손 응답** (아직 결정 전): 지금은 이름·버전을 null로 두고
   넘어가는데, 루트는 `CollectTarget`이 아니라 `CollectionOutcome`에도 사유가 남지 않는다.
@@ -266,3 +320,7 @@ core가 지는 책임은 "사용자명과 비밀번호는 함께 있거나 함�
 - **`CollectTarget.path()`의 query 파라미터가 테스트로 검증되지 않는다.** 테스트 서버가
   경로만 기록하므로 `bytes=b`(결정 1)·`include_defaults=true`·`format=json`이 누락돼도
   테스트가 통과한다.
+- **비밀번호 프롬프트 경로가 테스트되지 않는다.** TTY가 필요해서다. 환경변수 경로와
+  "TTY도 변수도 없으면 실패"는 테스트된다.
+- **배포 버전이 `0.0.1-SNAPSHOT`이다**(`build.gradle`). `--version`과 덤프의 `toolVersion`에
+  그대로 박히므로 릴리스 전에 정리해야 한다.

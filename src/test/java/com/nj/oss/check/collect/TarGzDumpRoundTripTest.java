@@ -14,6 +14,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -80,6 +81,18 @@ class TarGzDumpRoundTripTest {
         writer.write(Fixtures.load("normal"), archive);
 
         assertThat(archive).exists();
+    }
+
+    @Test
+    void refusesToReplaceAnExistingDump() throws IOException {
+        // a dump is evidence: a second run must not destroy the state the
+        // first one was collected to capture. CREATE_NEW makes the check and
+        // the creation one step, so a concurrent run cannot slip between them.
+        Path archive = Files.writeString(tempDir.resolve("dump.tar.gz"), "an earlier collection");
+
+        assertThatThrownBy(() -> writer.write(Fixtures.load("normal"), archive))
+                .isInstanceOf(FileAlreadyExistsException.class);
+        assertThat(archive).hasContent("an earlier collection");
     }
 
     @Test
