@@ -8,7 +8,7 @@ group = 'com.nj.oss.check'
 // Stamped into the jar manifest, and from there into --version and every
 // dump's toolVersion. A dump outlives the run that produced it, so this is
 // the only thing telling a later reader what built it (ToolVersion).
-version = '0.1.0-SNAPSHOT'
+version = '0.1.0'
 description = 'oss-check'
 
 java {
