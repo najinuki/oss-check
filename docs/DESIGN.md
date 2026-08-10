@@ -389,7 +389,7 @@ OPTIONAL 타깃이 빠진 덤프를 별도로 둔다. 검증 대상은 두 가�
     - ~~diagnose offline 모드~~ ✅ 완료 — `--input`, 텍스트·JSON 리포트
     - ~~룰 3개~~ ✅ 완료 — OSC-001/002/003, `rule.catalog`
     - ~~`diagnose --endpoint` live 모드~~ ✅ 완료 — 접속 옵션을 collect와 공유
-5. ~~README(영문 필수, 1절) + LICENSE + 버전 정리~~ ✅ 완료 — 버전은 `0.1.0-SNAPSHOT`
+5. ~~README(영문 필수, 1절) + LICENSE + 버전 정리~~ ✅ 완료 — 버전은 `0.1.0`
 
 **여기까지가 v0.1로 계획한 전부다.** 남은 것은 구현 중 발견한 숙제(IMPLEMENTATION.md
 "남은 숙제")와 8절 백로그이며, 둘 다 착수 전에 이 문서에서 결정한다.
