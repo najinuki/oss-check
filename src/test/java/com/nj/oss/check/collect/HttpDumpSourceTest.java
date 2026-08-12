@@ -100,6 +100,12 @@ class HttpDumpSourceTest {
         assertThat(snapshot.metadata().collection())
                 .hasSize(CollectTarget.values().length)
                 .allMatch(CollectionOutcome::isOk);
+        // Every response carries the instant it arrived. Without it a rate rule
+        // has nothing to divide by except the sample's single timestamp, which
+        // is stamped after the whole sweep.
+        assertThat(snapshot.metadata().collection())
+                .extracting(CollectionOutcome::collectedAt)
+                .doesNotContainNull();
     }
 
     @Test

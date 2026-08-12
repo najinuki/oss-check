@@ -1,5 +1,6 @@
 package com.nj.oss.check.collect;
 
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -18,12 +19,19 @@ import java.util.Optional;
  * @param httpStatus HTTP status returned by the cluster, null if the request
  *                   never got a response (connection failure, timeout)
  * @param message    failure detail, null when the collection succeeded
+ * @param collectedAt when this response was received, null only when read from
+ *                   a dump that predates the field. Rates divide counter deltas
+ *                   by the gap between <i>these</i> rather than between sample
+ *                   timestamps: a sample is stamped once, so a target read early
+ *                   in the sweep would otherwise be labelled seconds too late
+ *                   and the divisor would be wrong
  */
 public record CollectionOutcome(
         CollectTarget target,
         Status status,
         Integer httpStatus,
-        String message) {
+        String message,
+        Instant collectedAt) {
 
     public enum Status {
         /** Response stored in the dump. */
@@ -42,12 +50,13 @@ public record CollectionOutcome(
         status = status == null ? Status.UNKNOWN : status;
     }
 
-    public static CollectionOutcome ok(CollectTarget target, int httpStatus) {
-        return new CollectionOutcome(target, Status.OK, httpStatus, null);
+    public static CollectionOutcome ok(CollectTarget target, int httpStatus, Instant collectedAt) {
+        return new CollectionOutcome(target, Status.OK, httpStatus, null, collectedAt);
     }
 
-    public static CollectionOutcome failed(CollectTarget target, Integer httpStatus, String message) {
-        return new CollectionOutcome(target, Status.FAILED, httpStatus, message);
+    public static CollectionOutcome failed(
+            CollectTarget target, Integer httpStatus, String message, Instant collectedAt) {
+        return new CollectionOutcome(target, Status.FAILED, httpStatus, message, collectedAt);
     }
 
     public boolean isOk() {

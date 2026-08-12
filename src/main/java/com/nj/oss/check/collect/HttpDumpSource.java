@@ -21,6 +21,7 @@ import java.security.GeneralSecurityException;
 import java.security.cert.X509Certificate;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumMap;
@@ -92,12 +93,16 @@ public final class HttpDumpSource implements DumpSource {
 
         for (CollectTarget target : CollectTarget.values()) {
             Fetched fetched = fetch(target.path());
+            // Stamped per response, not once per sweep: this is the instant the
+            // counters in this payload were read, and rate rules divide by the
+            // gap between these.
+            Instant receivedAt = clock.instant();
             if (fetched.isOk()) {
                 payloads.put(target, fetched.body());
-                outcomes.add(CollectionOutcome.ok(target, fetched.httpStatus()));
+                outcomes.add(CollectionOutcome.ok(target, fetched.httpStatus(), receivedAt));
                 continue;
             }
-            outcomes.add(CollectionOutcome.failed(target, fetched.httpStatus(), fetched.message()));
+            outcomes.add(CollectionOutcome.failed(target, fetched.httpStatus(), fetched.message(), receivedAt));
             if (target.isRequired()) {
                 requiredFailures.add(target.fileName() + " (" + fetched.describe() + ")");
             }
