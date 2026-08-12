@@ -235,3 +235,61 @@ DESIGN.md의 "air-gapped by design" 정체성과 충돌하는 지점(상시 모�
 3. 결과적으로 oss-check가 노리는 지점 — **"근본원인 추론 체인 + evidence + recommendation"을
    air-gapped·무료·오픈소스로 제공** — 은 현재 OSS 생태계에 빈 자리가 맞다. 벤치마킹 대상이
    AutoOps 하나뿐인 이유가 바로 이것이다.
+
+---
+
+## 12. 성숙도 단계 모델 (2026-08-10 추가)
+
+AutoOps를 단계로 쪼개 보면 진단 제품이 어디까지 가는지가 드러난다. 아래 모델은 별도로
+정리된 요약을 검토해 이 프로젝트 제약에 맞게 **정정한 뒤** 옮긴 것이다.
+
+| 단계 | 내용 | oss-check 현재 |
+|---|---|---|
+| 1 | 데이터 수집 | ✅ `collect` — 15개 타깃 |
+| 2 | 룰 기반 점검 | ✅ `RuleEngine` + 룰 3개 |
+| 3 | 진단(현상 서술) | ✅ `Finding.finding` |
+| 4 | 교차 참조(correlation) | ✅ **룰 그 자체** (아래 정정 1) |
+| 5 | 조치 권고 | ✅ `Finding.recommendation` |
+| 6 | 실행 가능한 명령 생성 | ✅ recommendation이 구체적 API 호출을 담는다 |
+| 7 | 승인 후 자동 실행 | ❌ `fix` — DESIGN.md 7절 제외 |
+
+**정정 1 — correlation은 별도 계층이 아니다.** 원 모델은 "진단" 위에 "correlation"을
+얹힌 층으로 그린다. 이 프로젝트에서 교차 참조는 룰의 본체이지(DESIGN.md 4.3) 룰 위에
+올릴 것이 아니다. 별도 계층으로 오해하면 룰 위에 상관분석 엔진을 또 만드는,
+목적 없는 추상화가 된다.
+
+**정정 2 — 6단계는 이미 되어 있다.** `Finding.recommendation`은 처음부터 실행 가능한
+API 호출을 담는다(OSC-003의 `PUT _cluster/settings {...}`). 따라서 AutoOps 대비 실제
+공백은 7단계 하나이며, 그것이 DESIGN.md 7절이 의도적으로 제외한 `fix`다.
+
+### 12.1 수집 형태가 만드는 제약 (조사 관찰)
+
+**AutoOps는 상주 에이전트이고 oss-check는 시점 아티팩트다.** 이 차이 때문에 벤치마크
+목록의 일부는 "채택할까"가 아니라 "이 수집 형태로 닿는가"의 문제가 된다. 조사하면서
+확인된 것을 아래에 적는다.
+
+| 항목 | 무엇이 걸리는가 |
+|---|---|
+| Hot Thread 탐지 | `_nodes/hot_threads` 응답이 JSON이 아닌 텍스트다 (DESIGN.md 3.1이 제외한 이유) |
+| Hot Node 탐지 | 걸리는 것이 없다 — `_nodes/stats`의 노드별 CPU·load average로 판정 가능하고, 지금 파싱하지 않을 뿐이다 |
+| Slow Search / Slow Indexing | 슬로우 **로그 파일** 기반이다. oss-check는 노드 파일시스템에 접근하지 않는다 |
+| rate·latency 계열 | 두 시점 이상이 필요하다 |
+| `*_DISCONNECTED` 계열 | 상시 관측이 전제다 |
+| Long Running Task | `_tasks`가 수집 목록에 없다. **단, 원리적 제약은 아니다** — `_tasks`는 `running_time_in_nanos`를 주므로 한 번만 불러도 "10분째 돌고 있다"를 알 수 있다 |
+
+**누적 카운터를 현재 상태로 읽지 않는다.** `rejected`·`tripped`는 노드 기동 이후 누적이라
+단독으로는 몇 달 전 장애를 지금 일로 보고하게 된다(OSC-001이 tripped와 heap을 짝지은 이유).
+이 계열은 **현재를 말해주는 값과 짝지어야** 쓸 수 있다 — rejection이라면 누적 rejected +
+현재 큐 깊이.
+
+> **이 표는 관찰이지 결정이 아니다.** 이 중 무엇을 실제로 제외하고 무엇을 어떤 조건에서
+> 다시 볼지는 **DESIGN.md 10.5**에서 정한다. 특히 rate·latency 계열은 v0.2의 구간
+> 샘플링(DESIGN.md 10.2)으로 상당 부분 판정 범위에 들어왔다 — 이 문서의 관찰이 곧
+> 스코프가 아니라는 예다.
+
+### 12.2 air-gap 차별화 (기존 결론 재확인)
+
+별도 요약도 같은 결론에 도달했다: AutoOps의 구조는 `Agent → Internet → AutoOps Cloud`라
+완전 폐쇄망에서는 쓸 수 없고, 문서 본문을 보내지 않더라도 **인덱스명·노드 정보·클러스터
+구조·템플릿**은 외부로 나간다. 금융·공공·국방·산업제어망이 oss-check의 자리다.
+이는 DESIGN.md 1절의 "air-gapped by design"과 이미 일치하므로 새로운 결정 사항은 아니다.
