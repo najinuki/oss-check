@@ -3,8 +3,8 @@
 > 이 문서는 [DESIGN.md](DESIGN.md)의 설계 결정을 코드로 옮기면서 확정한 구현 구조와
 > 진행 중 내린 세부 결정의 기록이다. 설계 자체의 변경은 DESIGN.md에서만 다룬다.
 >
-> 마지막 갱신: 2026-07-31 (DESIGN.md 9절 **4단계 완료** — 수집 계층·CLI 계층·룰 3개·
-> live 모드까지. 남은 것은 README와 릴리스 버전 정리)
+> 마지막 갱신: 2026-08-12 (v0.1 릴리스 완료. **DESIGN.md 10절 v0.2 인프라 착수** —
+> 9단계 중 1~2단계까지)
 
 ## 1. 패키지 구조
 
@@ -171,7 +171,10 @@ Spring을 알게 된다. CLI는 목록을 받아쓰기만 한다.
   `metadata.json` 파일명 상수도 여기에 있다.
   REQUIRED는 `CLUSTER_HEALTH`·`NODES_STATS` 둘뿐이고 나머지 13개는 OPTIONAL이다.
   뒤쪽 8개는 **수집만 하고 아직 파싱하지 않는다** (수집은 넓게, 파싱은 룰 수요 기반).
-- `CollectionOutcome(target, status, httpStatus, message)` — 타깃별 수집 결과.
+  등급과 나란히 **`Cadence`(`PER_SAMPLE`/`SHARED`)**도 여기에 있다 — 구간 샘플링에서
+  매 샘플 뜰 것과 한 번만 뜰 것의 구분이다(결정 33).
+- `CollectionOutcome(target, status, httpStatus, message, collectedAt)` — 타깃별 수집 결과.
+  `collectedAt`은 **그 응답을 받은 시각**이고, rate 계산의 분모가 여기서 나온다(결정 34).
   `Status`는 `OK` / `FAILED` / `UNKNOWN`(신버전 덤프가 쓴 모르는 상태값).
   `describeFailure()`가 `"HTTP 403: no permissions for [...]"` 형태 문자열을 만든다.
 - `RawDump` — 파싱 전 원본 JSON 묶음 (metadata + 타깃별 payload 맵).
@@ -340,6 +343,8 @@ DESIGN.md 6절 전략대로 **픽스처 = 실제 API 응답 형태의 JSON**:
 | 30 | `diagnose`의 입력 소스는 배타 그룹 `multiplicity = "1"` (기본값 없음) | `--input`과 `--endpoint` 중 하나를 조용히 우선하면 **리포트가 어느 클러스터 얘기인지 알 수 없다**. 덤프는 몇 달 전 다른 곳의 상태일 수 있어서, 잘못 고른 쪽으로 진단하면 존재하지 않는 장애를 보고하거나 실제 장애를 놓친다. 둘 다 없을 때 무언가를 기본값으로 고르지 않고 usage 오류(종료 코드 2)로 끝내는 것도 같은 이유다 |
 | 31 | 클러스터 식별 실패를 `metadata.json`의 `identity_failure`로 기록 (DESIGN.md 3.1) | 루트 엔드포인트는 `CollectTarget`이 아니라 수집 리포트에 남을 자리가 없어, 403이든 "2xx인데 본문이 JSON이 아님"이든 이름·버전만 null이 되고 이유가 사라졌다. 후자는 앞단 프록시가 로그인 페이지를 200으로 돌려주는 전형적인 상황이라 실제로 마주친다. **본문 자체는 저장하지 않는다** — 그 HTML을 파일로 넣으면 결정 11("payload가 있는데 파손이면 예외")에 걸려 덤프 전체가 안 읽힌다. 사유 문자열만 남기고 리포트 헤더가 그것을 노출한다. 필드 추가는 구조를 깨지 않으므로 `dumpSchemaVersion`은 올리지 않았다. 부수적으로 **DESIGN.md 3.1의 `metadata.json` 예시가 camelCase로 적혀 있던 것을 실제 wire format인 snake_case로 정정**했다 — 문서대로 손으로 덤프를 만들면 파서가 못 읽는 상태였다 |
 | 32 | `metadata.json`에 **파생 상태를 쓰지 않고 null도 생략** (writer 매퍼의 mixin + `NON_NULL`) | 실제 클러스터로 처음 돌려본 덤프에 `ok`·`identified`·`newer_than_supported`가 들어 있었다. Jackson이 `isOk()` 같은 편의 메서드를 bean getter로 인식해 record 컴포넌트가 아닌데도 기록한 것이다. 두 개는 해롭기까지 하다 — `ok`는 `status`와 같은 사실을 두 번 적어 **몇 달 뒤 읽는 파일에 진실 원천이 둘**이 되고, `newer_than_supported`는 *읽는 쪽이 자기 버전과 비교해 내리는 판단*이라 쓰는 시점엔 언제나 `false`다. null 생략은 DESIGN.md 3.1의 "식별에 성공하면 이 필드는 없다"를 코드가 실제로 지키게 만든다. **mixin을 모델이 아니라 writer 쪽에 둔 이유**는 `SnapshotMetadata`/`CollectionOutcome`이 wire format을 알지 않게 하기 위해서다. 읽기는 영향받지 않는다 — 파서는 모르는 필드를 무시하고 없는 필드는 null로 둔다(결정 14) |
+| 33 | `CollectTarget`에 `Cadence`(`PER_SAMPLE`/`SHARED`) 추가, **기본은 `PER_SAMPLE`** | 구간 샘플링에서 무엇을 매번 뜰지 정해야 하는데, 기준을 "구간 안에서 변할 수 있는가"로 잡으면 `cluster_settings`가 공유로 분류된다 — 장애 대응 중 **가장 자주 바뀌는** 값이고 OSC-003의 존재 이유가 "설정을 바꿔놓고 잊었다"인데도 그렇다. 그래서 기준을 **"변하면 진단이 달라지는가 + 반복 비용을 감당할 수 있는가"**로 잡았다. SHARED는 셋뿐이고 **그 근거도 하나가 아니다**: `index_templates`·`cat_plugins`는 구조적으로 정적이고, `cat_segments`는 **정적이 아니지만**(색인·merge로 계속 변한다) 과다 세그먼트가 시간 단위로 쌓이는 상태라 1분 구간에서 판정이 뒤집히지 않고 응답이 가장 크다. 하나로 뭉뚱그려 "정적인 것"이라 적으면 틀린 주장이 문서에 남고 다음 사람이 그 기준으로 새 타깃을 분류한다. 가드 테스트가 SHARED 집합을 고정하고 `cluster_settings`가 `PER_SAMPLE`인지를 따로 한 번 더 본다 |
+| 34 | `CollectionOutcome`에 `collectedAt`(응답 수신 시각) 추가 | v0.1은 15개 타깃을 **다 돈 뒤** `clock.instant()`를 한 번 찍었다. `_nodes/stats`는 순회 앞쪽이라 **카운터를 T+1초에 읽고 시각은 T+15초로 기록**됐고, 단일 스냅샷에서는 "언제 뜬 덤프인가" 표시용이라 무해했다. **v0.2는 그 시각으로 나눗셈을 한다** — 샘플마다 수집 소요가 다르면(장애 중에는 응답이 전반적으로 느려진다) 분모가 틀리고, 30초 간격에서 몇 초만 어긋나도 rate가 십수 퍼센트 흔들린다. 근거로 내놓는 숫자가 조용히 틀리는 자리라 타깃마다 찍는다. 샘플 단위 시각은 `startedAt`으로 따로 둔다(DESIGN.md 10.2) |
 
 ## 8. 다음 단계
 
@@ -381,3 +386,26 @@ v0.2 백로그(DESIGN.md 8절)다.
 
 - **비밀번호 프롬프트 경로가 테스트되지 않는다.** TTY가 필요해서다. 환경변수 경로와
   "TTY도 변수도 없으면 실패"는 테스트된다.
+
+## 9. v0.2 — 구간 샘플링 인프라 (진행 중)
+
+DESIGN.md 10절이 확정한 v0.2의 첫 항목(10.4의 1번)을 구현 중이다. 빌드가 항상 초록인
+상태로 가도록 아홉 조각으로 나눴다. **진행 상황의 기록은 이 표 하나뿐이다** — DESIGN.md는
+무엇을 만들지를, 이 문서는 어디까지 왔는지를 담는다. 두 곳에 적으면 언젠가 갈라진다.
+
+| # | 단계 | 상태 |
+|---|---|---|
+| 1 | `CollectTarget.Cadence` — `PER_SAMPLE` / `SHARED` | ✅ 결정 33 |
+| 2 | `CollectionOutcome.collectedAt` — 타깃별 수신 시각 | ✅ 결정 34 |
+| 3 | `SnapshotMetadata` 재구성 — `shared` + `samples[]`, 스키마 2, 버전 1 거부 | |
+| 4 | `RawDump` 구조 변경 — 공유 payload + 샘플별 payload 목록 | |
+| 5 | `TarGzDumpWriter` / `TarGzDumpSource` — `collection/` 레이아웃, 경로 인식 | |
+| 6 | `HttpDumpSource` N회 수집 — 샘플 폐기 정책 | |
+| 7 | `ClusterSnapshotParser` → `SnapshotSequence` | |
+| 8 | 시퀀스 룰 인터페이스 + `RuleEngine` 통합 | |
+| 9 | CLI `--samples` / `--interval` | |
+
+**3단계부터 wire format이 바뀐다.** 픽스처의 `metadata.json`과 파서 테스트가 함께 움직이고,
+`Fixtures`는 평평한 픽스처 디렉토리를 "공유분 + 샘플 1개"로 해석하도록 바뀐다.
+픽스처 파일 자체는 건드리지 않는다 — `Fixtures`가 tar 리더를 거치지 않고 리소스에서 직접
+`RawDump`를 만들기 때문이다(DESIGN.md 10.2의 구현 파급 표).
